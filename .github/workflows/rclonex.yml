@@ -92,13 +92,13 @@ jobs:
           fi
       - name: Package
         run: |
-          v="$(cat VERSION)"
+          # Unversioned asset names so releases/latest/download/<name> works for scripts
           cd stage
           if [ "${{ matrix.goos }}" = windows ]; then
             apt-get update -qq && apt-get install -y -qq zip >/dev/null
-            zip "rclonex_${v}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" rclonex.exe
+            zip "rclonex_${{ matrix.goos }}_${{ matrix.goarch }}.zip" rclonex.exe
           else
-            tar -czf "rclonex_${v}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" rclonex
+            tar -czf "rclonex_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" rclonex
           fi
       - uses: actions/upload-artifact@v7
         with:
@@ -114,6 +114,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           pattern: rclonex-*
@@ -123,17 +124,23 @@ jobs:
         run: |
           sha256sum rclonex_* > checksums.txt
           cat checksums.txt
+      - name: Prepare install script
+        run: cp bin/install-rclonex.sh install.sh
       - name: Create or update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Pre-release only for suffixed tags (e.g. -alpha.1) so plain CalVer
+          # tags become full releases and releases/latest resolves for them.
+          prerelease=
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=--prerelease; fi
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             # Idempotent re-runs (e.g. after a tag move): drop the old
             # assets so only correctly named ones remain, then upload.
             for a in $(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
               gh release delete-asset "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "$a" --yes
             done
-            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" rclonex_* checksums.txt
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" rclonex_* checksums.txt install.sh
           else
-            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --prerelease --title "$GITHUB_REF_NAME" rclonex_* checksums.txt
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes $prerelease --title "$GITHUB_REF_NAME" rclonex_* checksums.txt install.sh
           fi
