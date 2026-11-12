@@ -10,6 +10,7 @@ import (
 	"io"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/mholt/archives"
 	"github.com/rclone/rclone/cmd"
@@ -33,7 +34,7 @@ func init() {
 	flagSet := Command.Flags()
 	flags.StringVarP(flagSet, &archivePassword, "archive-password", "", "", "Password for encrypted RAR and 7z archives", "")
 	flags.BoolVarP(flagSet, &archiveContinueOnError, "archive-continue-on-error", "", false, "Continue on errors instead of aborting extraction", "")
-	flags.Int64VarP(flagSet, &archiveWindowSize, "archive-window-size", "", 16<<20, "Sliding window cache size in bytes for random-access archives (ZIP, 7z); 0 disables caching", "")
+	flags.Int64VarP(flagSet, &archiveWindowSize, "archive-window-size", "", 16<<20, "Sliding window cache size in bytes for random-access archives (ZIP, 7z, ISO9660); 0 disables caching", "")
 	archive.Command.AddCommand(Command)
 }
 
@@ -103,11 +104,13 @@ $ rclone tree remote:extracted
 
 The source or destination or both can be local or remote. The source
 archive is streamed - it is not downloaded to the local machine first.
-Formats which need random access (ZIP and 7z) are read through a sliding
-window cache of ranged reads; formats which are single pass (tar, tar.gz
-...) are read sequentially. Remotes which do not support range reads
-make ZIP and 7z archives fail with an explicit error rather than being
-accessed in some other way.
+Formats which need random access (ZIP, 7z and ISO9660 images) are read
+through a sliding window cache of ranged reads; formats which are single
+pass (tar, tar.gz ...) are read sequentially. Remotes which do not
+support range reads make ZIP, 7z and ISO9660 archives fail with an
+explicit error rather than being accessed in some other way. ISO9660
+images with Rock Ridge or Joliet extensions are supported, including
+their long filenames.
 
 Filters can be used to only extract certain files:
 
@@ -203,6 +206,80 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 	if err != nil {
 		return err
 	}
+
+	// handleEntry extracts one entry from the archive. It is shared by
+	// the archive-format extraction path and the ISO9660 path. open opens
+	// the entry for reading; it must not be nil for regular files.
+	handleEntry := func(nameInArchive string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error {
+		remote, err := destPath(nameInArchive, dstDir)
+		if err != nil {
+			return err
+		}
+		// Skip the archive root entry ("./") which has no name of its own.
+		if remote == "" {
+			return nil
+		}
+		// check if file should be extracted
+		if !fi.Include(remote, size, modTime, fs.Metadata{}) {
+			return nil
+		}
+		// process directory
+		if isDir {
+			// directory
+			fs.Debugf(nil, "mkdir %s", remote)
+			// leave if --dry-run set
+			if ci.DryRun {
+				return nil
+			}
+			// create the directory
+			return operations.Mkdir(ctx, dst, remote)
+		}
+		// process file
+		fs.Debugf(nil, "Extract %s", remote)
+		// leave if --dry-run set
+		if ci.DryRun {
+			filesExtracted++
+			return nil
+		}
+		// open file
+		fin, err := open()
+		if err != nil {
+			return err
+		}
+		counter := &countingReadCloser{ReadCloser: fin}
+		// extract the file to destination; Rcat creates its own per-file
+		// transfer for the upload
+		obj, err := operations.Rcat(ctx, dst, remote, counter, modTime, nil)
+		if err == nil && size >= 0 && counter.n != size {
+			// The upload succeeded but the archive didn't contain as many
+			// bytes as it claims for the entry - don't keep the partial file.
+			if removeErr := obj.Remove(ctx); removeErr != nil {
+				fs.Debugf(nil, "Failed to remove incomplete %q: %v", remote, removeErr)
+			}
+			err = fmt.Errorf("archive entry %q: extracted %d bytes, expected %d (archive may be corrupt)", nameInArchive, counter.n, size)
+		}
+		if err == nil {
+			filesExtracted++
+		}
+		return err
+	}
+	// ISO9660 images are not recognised by the archives library, so
+	// detect them by the "CD001" standard identifier instead. Like ZIP
+	// and 7z they are read through a windowed reader over ranged opens.
+	if probeISO(in, srcObj.Size()) {
+		if opts.password != "" {
+			return fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
+		}
+		fs.Debugf(nil, "Extract %s/%s, format iso to %s", src.Root(), srcFile, dst.Root())
+		tr.Reset(ctx)
+		source, err := newWindowedReader(ctx, srcObj, opts.windowSize, tr, options...)
+		if err != nil {
+			return err
+		}
+		err = extractISO(ctx, source, srcObj.Size(), opts.continueOnError, handleEntry)
+		fs.Infof(nil, "Total files extracted %d", filesExtracted)
+		return err
+	}
 	// identify format
 	format, buffered, err := archives.Identify(ctx, "", in)
 	if err != nil {
@@ -271,57 +348,9 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 
 	// extract files
 	err = ex.Extract(ctx, source, func(ctx context.Context, f archives.FileInfo) error {
-		remote, err := destPath(f.NameInArchive, dstDir)
-		if err != nil {
-			return err
-		}
-		// Skip the archive root entry ("./") which has no name of its own.
-		if remote == "" {
-			return nil
-		}
-		// check if file should be extracted
-		if !fi.Include(remote, f.Size(), f.ModTime(), fs.Metadata{}) {
-			return nil
-		}
-		// process directory
-		if f.IsDir() {
-			// directory
-			fs.Debugf(nil, "mkdir %s", remote)
-			// leave if --dry-run set
-			if ci.DryRun {
-				return nil
-			}
-			// create the directory
-			return operations.Mkdir(ctx, dst, remote)
-		}
-		// process file
-		fs.Debugf(nil, "Extract %s", remote)
-		// leave if --dry-run set
-		if ci.DryRun {
-			filesExtracted++
-			return nil
-		}
-		// open file
-		fin, err := f.Open()
-		if err != nil {
-			return err
-		}
-		counter := &countingReadCloser{ReadCloser: fin}
-		// extract the file to destination; Rcat creates its own per-file
-		// transfer for the upload
-		obj, err := operations.Rcat(ctx, dst, remote, counter, f.ModTime(), nil)
-		if err == nil && f.Size() >= 0 && counter.n != f.Size() {
-			// The upload succeeded but the archive didn't contain as many
-			// bytes as it claims for the entry - don't keep the partial file.
-			if removeErr := obj.Remove(ctx); removeErr != nil {
-				fs.Debugf(nil, "Failed to remove incomplete %q: %v", remote, removeErr)
-			}
-			err = fmt.Errorf("archive entry %q: extracted %d bytes, expected %d (archive may be corrupt)", f.NameInArchive, counter.n, f.Size())
-		}
-		if err == nil {
-			filesExtracted++
-		}
-		return err
+		return handleEntry(f.NameInArchive, f.Size(), f.ModTime(), f.IsDir(), func() (io.ReadCloser, error) {
+			return f.Open()
+		})
 	})
 
 	fs.Infof(nil, "Total files extracted %d", filesExtracted)
