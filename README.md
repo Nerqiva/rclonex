@@ -231,41 +231,15 @@ source remote to the destination remote — complete archives are never download
 
 ## Quick install
 
-Pre-built static binaries are attached to each [GitHub Release](https://github.com/Nerqiva/rclonex/releases).
-The quickest install (Linux and macOS) is the install script — it detects your OS/arch, downloads
-the latest archive, verifies its checksum against `checksums.txt` and installs `rclonex` to
-`/usr/local/bin`:
-
 ```console
-# latest stable release (works once a non-pre-release tag is cut)
-curl -fsSL https://github.com/Nerqiva/rclonex/releases/latest/download/install.sh | sudo bash
-
-# latest pre-release (currently v2026.11.0-alpha.1)
-curl -fsSL https://raw.githubusercontent.com/Nerqiva/rclonex/main/bin/install-rclonex.sh | sudo bash -s beta
+curl -fsSL https://raw.githubusercontent.com/Nerqiva/rclonex/main/bin/install-rclonex.sh | sudo bash
 ```
 
-The script also ships as the `install.sh` asset on every release, and won't re-download if the
-installed version is already up to date. Windows and manual installs: download the archive for
-your platform from the [releases page](https://github.com/Nerqiva/rclonex/releases) and verify it
-against `checksums.txt` (archives are named `rclonex_<os>_<arch>.tar.gz`/`.zip`):
-
-```console
-# pick: amd64, arm64 or 386
-TAG=v2026.11.0-alpha.1
-ARCH=amd64
-curl -LO "https://github.com/Nerqiva/rclonex/releases/download/$TAG/rclonex_linux_${ARCH}.tar.gz"
-curl -LO "https://github.com/Nerqiva/rclonex/releases/download/$TAG/checksums.txt"
-
-# verify the checksum (files listed in checksums.txt are named rclonex_<os>_<arch>.tar.gz)
-grep "linux_${ARCH}.tar.gz" checksums.txt | sha256sum -c -
-
-# install system-wide (needs sudo); use ~/.local/bin instead to avoid sudo
-tar -xzf "rclonex_linux_${ARCH}.tar.gz"
-sudo install -m 0755 rclonex /usr/local/bin/rclonex
-
-# sanity check
-rclonex version
-```
+The script detects your OS/arch, downloads the latest archive (the latest pre-release when no
+stable release exists yet), verifies its checksum against `checksums.txt` and installs `rclonex`
+to `/usr/local/bin` — re-running it won't re-download an up-to-date binary. `install.sh` is also
+attached to every release. Linux and macOS only; on Windows download the `.zip` from the
+[releases page](https://github.com/Nerqiva/rclonex/releases).
 
 Or build from source (Go 1.26+):
 
