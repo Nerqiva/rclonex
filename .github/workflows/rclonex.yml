@@ -123,7 +123,17 @@ jobs:
         run: |
           sha256sum rclonex_* > checksums.txt
           cat checksums.txt
-      - name: Create release
+      - name: Create or update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --prerelease --title "$GITHUB_REF_NAME" rclonex_* checksums.txt
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Idempotent re-runs (e.g. after a tag move): drop the old
+            # assets so only correctly named ones remain, then upload.
+            for a in $(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
+              gh release delete-asset "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "$a" --yes
+            done
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" rclonex_* checksums.txt
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes --prerelease --title "$GITHUB_REF_NAME" rclonex_* checksums.txt
+          fi
