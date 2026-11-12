@@ -229,23 +229,38 @@ source remote to the destination remote — complete archives are never download
 - **Issues and releases:** releases are tagged on release branches and built by the
   `rclonex` GitHub Actions workflow; the releases page holds the binaries.
 
-## Downloading and installing rclonex on Linux
+## Quick install
 
 Pre-built static binaries are attached to each [GitHub Release](https://github.com/Nerqiva/rclonex/releases).
-The current pre-release is `v2026.11.0-alpha.1`:
+The quickest install (Linux and macOS) is the install script — it detects your OS/arch, downloads
+the latest archive, verifies its checksum against `checksums.txt` and installs `rclonex` to
+`/usr/local/bin`:
+
+```console
+# latest stable release (works once a non-pre-release tag is cut)
+curl -fsSL https://github.com/Nerqiva/rclonex/releases/latest/download/install.sh | sudo bash
+
+# latest pre-release (currently v2026.11.0-alpha.1)
+curl -fsSL https://raw.githubusercontent.com/Nerqiva/rclonex/main/bin/install-rclonex.sh | sudo bash -s beta
+```
+
+The script also ships as the `install.sh` asset on every release, and won't re-download if the
+installed version is already up to date. Windows and manual installs: download the archive for
+your platform from the [releases page](https://github.com/Nerqiva/rclonex/releases) and verify it
+against `checksums.txt` (archives are named `rclonex_<os>_<arch>.tar.gz`/`.zip`):
 
 ```console
 # pick: amd64, arm64 or 386
 TAG=v2026.11.0-alpha.1
 ARCH=amd64
-curl -LO "https://github.com/Nerqiva/rclonex/releases/download/$TAG/rclonex_${TAG}_linux_${ARCH}.tar.gz"
+curl -LO "https://github.com/Nerqiva/rclonex/releases/download/$TAG/rclonex_linux_${ARCH}.tar.gz"
 curl -LO "https://github.com/Nerqiva/rclonex/releases/download/$TAG/checksums.txt"
 
-# verify the checksum (files listed in checksums.txt are named rclonex_<ver>_<os>_<arch>.tar.gz)
+# verify the checksum (files listed in checksums.txt are named rclonex_<os>_<arch>.tar.gz)
 grep "linux_${ARCH}.tar.gz" checksums.txt | sha256sum -c -
 
 # install system-wide (needs sudo); use ~/.local/bin instead to avoid sudo
-tar -xzf "rclonex_${TAG}_linux_${ARCH}.tar.gz"
+tar -xzf "rclonex_linux_${ARCH}.tar.gz"
 sudo install -m 0755 rclonex /usr/local/bin/rclonex
 
 # sanity check
@@ -264,7 +279,7 @@ rclonex version
 
 **Note:** `go install github.com/rclone/rclone@latest` installs *upstream* rclone, not rclonex — the Go module path is deliberately unchanged so upstream rebases stay easy. Build from the rclonex clone as shown above, or download a release binary.
 
-Releases are pre-releases cut from `release/<tag>` branches by the `rclonex` GitHub Actions workflow. Upstream rclone releases (rclone.org) do not include rclonex.
+Releases are cut from `release/<tag>` branches by the `rclonex` GitHub Actions workflow. Tags with a suffix (e.g. `-alpha.N`) are published as pre-releases; plain CalVer tags are full releases and back `releases/latest`. Upstream rclone releases (rclone.org) do not include rclonex.
 
 ## What rclonex changes: `archive extract`
 
