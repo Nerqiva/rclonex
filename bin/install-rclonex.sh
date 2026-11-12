@@ -63,15 +63,21 @@ fi
 # with grep/cut rather than requiring jq)
 if [ -n "$install_beta" ]; then
     releases_api="https://api.github.com/repos/${REPO}/releases?per_page=1"
+    releases_json=$(curl -fsSL "$releases_api" 2>errors) || {
+        echo "Failed to query $releases_api"
+        exit 1
+    }
 else
-    releases_api="https://api.github.com/repos/${REPO}/releases/latest"
-fi
-if ! releases_json=$(curl -fsSL "$releases_api" 2>errors); then
-    printf "\nFailed to query %s\n" "$releases_api"
-    if [ -z "$install_beta" ]; then
-        echo "No stable release exists yet - run again with '-s beta' to install the latest pre-release."
-    fi
-    exit 1
+    releases_json=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>errors) || {
+        # no stable release yet - install the newest pre-release instead
+        echo 'No stable release exists yet - installing the latest pre-release instead.'
+        install_beta="beta "
+        releases_api="https://api.github.com/repos/${REPO}/releases?per_page=1"
+        releases_json=$(curl -fsSL "$releases_api" 2>errors) || {
+            echo "Failed to query $releases_api"
+            exit 1
+        }
+    }
 fi
 target_tag=$(printf '%s' "$releases_json" | grep -m1 -o '"tag_name":[^,]*' | cut -d'"' -f4)
 if [ -z "$target_tag" ]; then
