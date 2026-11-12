@@ -18,8 +18,10 @@ superseded by GitHub issues and the same task IDs will be reused.
 | T5 | Multi-volume 7z (`.7z.001` split volumes) via concatenated verified ranged reads over remote objects | done | 81cc2faa5 |
 | T6 | Test fixtures + integration tests for all six formats, encrypted and multi-volume variants, corrupt-archive and range-ignoring remotes | done | 6bc6d9c7e + 81cc2faa5 |
 | T7 | Documentation: fork/design notes, updated `archive extract` page, rebase guide, resource/limits discussion | done | this commit |
-| T8 | CI: full-suite regression on push, memory-bounded extraction test job, release workflow wiring (Calver tag → release branch → binaries + checksums) | pending | — |
-| T9 | First Calver alpha release `v2026.11.0-alpha.1` from `release/v2026.11.0-alpha.1` (release branch per version; the bootstrap pins the same string) | pending | — |
+| T8 | CI: full-suite regression on push, memory-bounded extraction test job, release workflow wiring (Calver tag → release branch → binaries + checksums) | done | 0dad1d9d7 + 8a75e7fe3 + f27ce4043 (green run 43221982203) |
+| T9 | First Calver alpha release `v2026.11.0-alpha.1` from `release/v2026.11.0-alpha.1` (release branch per version; the bootstrap pins the same string) | done | release/v2026.11.0-alpha.1 |
+
+Note: the GitHub Actions release job runs on tag push; the GitHub API/token in this environment cannot create issues or PRs (403) and may not be able to create the GitHub release itself — workflow artifacts (binaries + checksums) are always produced; see the release workflow run for the release job result.
 
 ## Requirements coverage
 
