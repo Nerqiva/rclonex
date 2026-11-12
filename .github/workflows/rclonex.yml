@@ -92,12 +92,13 @@ jobs:
           fi
       - name: Package
         run: |
+          v="$(cat VERSION)"
           cd stage
           if [ "${{ matrix.goos }}" = windows ]; then
             apt-get update -qq && apt-get install -y -qq zip >/dev/null
-            zip "rclonex_$(cat VERSION)_${{ matrix.goos }}_${{ matrix.goarch }}.zip" rclonex.exe
+            zip "rclonex_${v}_${{ matrix.goos }}_${{ matrix.goarch }}.zip" rclonex.exe
           else
-            tar -czf "rclonex_$(cat VERSION)_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" rclonex
+            tar -czf "rclonex_${v}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" rclonex
           fi
       - uses: actions/upload-artifact@v4
         with:
