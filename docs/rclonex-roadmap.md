@@ -1,17 +1,14 @@
 # rclonex roadmap and task tracking
 
-rclonex is a private fork of [rclone/rclone](https://github.com/rclone/rclone) whose only
+rclonex is a public fork of [rclone/rclone](https://github.com/rclone/rclone) whose only
 functional change is an extended `rclone archive extract` with streaming remote-to-remote
-archive extraction. This file tracks the work items. GitHub issues/PRs cannot be used with the
-current access token (403 — the token may create repos and push, but not issues/PRs), so tasks
-are tracked here and referenced from commits; once the token is fixed this file will be
-superseded by GitHub issues and the same task IDs will be reused.
+archive extraction. This file tracks the work items. Tasks are tracked in this file and referenced from commits.
 
 ## Task list
 
 | ID | Task | Status | Commit |
 |----|------|--------|--------|
-| T1 | Fork bootstrap: private repo, Calver version, binary renamed `rclonex`, CI (`rclonex.yml`), fork notes | done | 66bd982fc |
+| T1 | Fork bootstrap: public repo, Calver version, binary renamed `rclonex`, CI (`rclonex.yml`), fork notes | done | 66bd982fc |
 | T2 | Windowed verified range-read cache for random-access formats (ZIP, 7z); no silent fallback when remote ignores Range | done | 6bc6d9c7e |
 | T3 | Extraction hardening: per-entry integrity check (extracted bytes vs declared size, partial file removed on mismatch), `--archive-password`, `--archive-continue-on-error`, `--archive-window-size`, context-scoped options | done | 6bc6d9c7e |
 | T4 | Multi-volume RAR/RAR5 streamed from remotes (rardecode `Name`+`FS` over the source remote, new and old volume naming) | done | 81cc2faa5 |

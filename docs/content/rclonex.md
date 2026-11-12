@@ -6,7 +6,7 @@ versionIntroduced: v2026.11.0-alpha.1
 
 # rclonex fork notes
 
-`rclonex` is a private fork of [rclone/rclone](https://github.com/rclone/rclone). Against a
+`rclonex` is a public fork of [rclone/rclone](https://github.com/rclone/rclone) — a personal project, nowhere near production ready. Against a
 stock rclone it adds exactly one functional change: an **extended `rclone archive extract`**
 that streams archives directly from a source remote to a destination remote, without mounting
 and without ever staging the complete archive (or the extracted tree) on local disk.
