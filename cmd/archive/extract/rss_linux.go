@@ -11,5 +11,5 @@ func maxRSSBytes() int64 {
 	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
 		return 0
 	}
-	return ru.Maxrss * 1024
+	return int64(ru.Maxrss) * 1024
 }
