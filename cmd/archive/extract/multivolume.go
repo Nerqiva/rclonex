@@ -17,6 +17,33 @@ import (
 	"github.com/rclone/rclone/fs/accounting"
 )
 
+// eofNormalizeReader adapts a stream so io.EOF never accompanies data: a
+// remote whose reader returns (n > 0, io.EOF) - legal, but rardecode's
+// volume buffer keeps the stale io.EOF across volumes when this happens,
+// failing the next volume with "RAR signature not found". EOF is reported
+// only on the following zero-length read.
+type eofNormalizeReader struct {
+	rc  io.ReadCloser
+	eof bool
+}
+
+func (r *eofNormalizeReader) Read(p []byte) (int, error) {
+	if r.eof {
+		return 0, io.EOF
+	}
+	n, err := r.rc.Read(p)
+	if n > 0 && err == io.EOF {
+		r.eof = true
+		return n, nil
+	}
+	if err == io.EOF {
+		r.eof = true
+	}
+	return n, err
+}
+
+func (r *eofNormalizeReader) Close() error { return r.rc.Close() }
+
 // remoteFS exposes an rclone fs.Fs as an io/fs.FS so rardecode can open
 // multi-volume archive volumes by name. Names arrive as
 // path.Dir(srcFile)+"/"+volume (e.g. "sub/dir/fixture.part2.rar" when the
@@ -49,6 +76,9 @@ func (r remoteFS) Open(name string) (iofs.File, error) {
 	if err != nil {
 		return nil, &iofs.PathError{Op: "open", Path: name, Err: err}
 	}
+	// Normalize before accounting so the transfer observes the same reads
+	// rardecode consumes
+	rc = &eofNormalizeReader{rc: rc}
 	if r.acc != nil {
 		rc = r.acc.Account(r.ctx, rc)
 	}

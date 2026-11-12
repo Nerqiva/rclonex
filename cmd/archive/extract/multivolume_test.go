@@ -53,6 +53,67 @@ func assertFixtureContents(t *testing.T, ctx context.Context, dst fs.Fs) {
 	}
 }
 
+// eofChunkFs wraps a memory fs so every Open reports the final bytes with
+// io.EOF, like an HTTP response body
+type eofChunkFs struct{ fs.Fs }
+
+func (f *eofChunkFs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
+	obj, err := f.Fs.NewObject(ctx, remote)
+	if err != nil {
+		return nil, err
+	}
+	return &eofChunkObject{obj}, nil
+}
+
+type eofChunkObject struct{ fs.Object }
+
+func (o *eofChunkObject) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadCloser, error) {
+	rc, err := o.Object.Open(ctx, options...)
+	if err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		_ = rc.Close()
+		return nil, err
+	}
+	_ = rc.Close()
+	return &eofChunkReader{data: data}, nil
+}
+
+// eofChunkReader returns io.EOF alongside the final data chunk, not on the
+// following zero-length read
+type eofChunkReader struct {
+	data []byte
+	done bool
+}
+
+func (r *eofChunkReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, io.EOF
+	}
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	if len(r.data) == 0 {
+		r.done = true
+		return n, io.EOF
+	}
+	return n, nil
+}
+
+func (r *eofChunkReader) Close() error { return nil }
+
+func TestExtractRarMultiVolumeChunkedEOF(t *testing.T) {
+	ctx := context.Background()
+	base := memoryFs(t, "src")
+	src := &eofChunkFs{base}
+	dst := memoryFs(t, "dst")
+	uploadFixtureVolumes(t, ctx, base, "", "mv-multivolume.part1.rar", "mv-multivolume.part2.rar", "mv-multivolume.part3.rar")
+
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-multivolume.part1.rar"))
+	assertFixtureContents(t, ctx, dst)
+}
+
 func TestExtractRarMultiVolume(t *testing.T) {
 	ctx := context.Background()
 	src := memoryFs(t, "src")
