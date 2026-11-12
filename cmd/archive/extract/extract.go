@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"path"
 	"strings"
 
@@ -15,14 +16,54 @@ import (
 	"github.com/rclone/rclone/cmd/archive"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/accounting"
+	"github.com/rclone/rclone/fs/config/flags"
 	"github.com/rclone/rclone/fs/filter"
 	"github.com/rclone/rclone/fs/operations"
 	"github.com/rclone/rclone/lib/sanitize"
 	"github.com/spf13/cobra"
 )
 
+var (
+	archivePassword        string
+	archiveContinueOnError bool
+	archiveWindowSize      int64
+)
+
 func init() {
+	flagSet := Command.Flags()
+	flags.StringVarP(flagSet, &archivePassword, "archive-password", "", "", "Password for encrypted RAR and 7z archives", "")
+	flags.BoolVarP(flagSet, &archiveContinueOnError, "archive-continue-on-error", "", false, "Continue on errors instead of aborting extraction", "")
+	flags.Int64VarP(flagSet, &archiveWindowSize, "archive-window-size", "", 16<<20, "Sliding window cache size in bytes for random-access archives (ZIP, 7z); 0 disables caching", "")
 	archive.Command.AddCommand(Command)
+}
+
+// extractOptions carries the archive extraction command options to
+// ArchiveExtract. It is stored in the context, mirroring how the filter
+// config travels.
+type extractOptions struct {
+	password        string
+	continueOnError bool
+	windowSize      int64
+}
+
+const defaultWindowSize = 16 << 20
+
+type extractOptionsKey struct{}
+
+// withExtractOptions returns a context with the extract options set.
+func withExtractOptions(ctx context.Context, o extractOptions) context.Context {
+	return context.WithValue(ctx, extractOptionsKey{}, o)
+}
+
+// extractOptionsFrom extracts the options from the context, or returns the
+// defaults if the context doesn't carry any - e.g. when ArchiveExtract is
+// called directly.
+func extractOptionsFrom(ctx context.Context) extractOptions {
+	o, ok := ctx.Value(extractOptionsKey{}).(extractOptions)
+	if !ok {
+		o.windowSize = defaultWindowSize
+	}
+	return o
 }
 
 // Command - extract
@@ -60,7 +101,13 @@ $ rclone tree remote:extracted
 └── file.txt
 |||
 
-The source or destination or both can be local or remote.
+The source or destination or both can be local or remote. The source
+archive is streamed - it is not downloaded to the local machine first.
+Formats which need random access (ZIP and 7z) are read through a sliding
+window cache of ranged reads; formats which are single pass (tar, tar.gz
+...) are read sequentially. Remotes which do not support range reads
+make ZIP and 7z archives fail with an explicit error rather than being
+accessed in some other way.
 
 Filters can be used to only extract certain files:
 
@@ -72,21 +119,33 @@ $ rclone tree partial
     └── bye.txt
 |||
 
+RAR and 7z archives can be encrypted - use --archive-password to set
+the password.
+
+Spanned/multi-disk ZIPs and multi-part TAR archives are not supported.
+
 The [archive backend](/archive/) can also be used to extract files. It
 can be used to read only mount archives also but it supports a
 different set of archive formats to the archive commands.
 `, "|", "`"),
+
 	Annotations: map[string]string{
 		"versionIntroduced": "v1.72",
 	},
 	RunE: func(command *cobra.Command, args []string) error {
 		cmd.CheckArgs(2, 2, command, args)
 
+		opts := extractOptions{
+			password:        archivePassword,
+			continueOnError: archiveContinueOnError,
+			windowSize:      archiveWindowSize,
+		}
+
 		src, srcFile := cmd.NewFsFile(args[0])
 		dst, dstFile := cmd.NewFsFile(args[1])
 
 		cmd.Run(false, false, command, func() error {
-			return ArchiveExtract(context.Background(), dst, dstFile, src, srcFile)
+			return ArchiveExtract(withExtractOptions(context.Background(), opts), dst, dstFile, src, srcFile)
 		})
 		return nil
 	},
@@ -100,6 +159,7 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 
 	fi := filter.GetConfig(ctx)
 	ci := fs.GetConfig(ctx)
+	opts := extractOptionsFrom(ctx)
 	// get source object
 	srcObj, err = src.NewObject(ctx, srcFile)
 	fs.Debugf(nil, "srcFile: %q, src : %v", srcFile, src)
@@ -130,6 +190,9 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 	if err != nil {
 		return fmt.Errorf("failed to open file %s: %w", srcFile, err)
 	}
+	defer func() {
+		_ = in0.Close()
+	}()
 	// account and buffer the transfer
 	// in = tr.Account(ctx, in).WithBuffer()
 	acc := tr.Account(ctx, in0)
@@ -138,19 +201,42 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 		return err
 	}
 	// identify format
-	format, _, err := archives.Identify(ctx, "", in)
+	format, buffered, err := archives.Identify(ctx, "", in)
 	if err != nil {
 		return fmt.Errorf("failed to open check file type: %w", err)
 	}
 	fs.Debugf(nil, "Extract %s/%s, format %s to %s", src.Root(), srcFile, strings.TrimPrefix(format.Extension(), "."), dst.Root())
+
+	// apply command options (password, continue on error) to the format
+	format, err = applyOptions(format, opts)
+	if err != nil {
+		return err
+	}
 
 	// check if extract is supported by format
 	ex, isExtract := format.(archives.Extraction)
 	if !isExtract {
 		return fmt.Errorf("extraction for %s not supported", strings.TrimPrefix(format.Extension(), "."))
 	}
+
+	// Random access formats (ZIP and 7z) are read through a windowed
+	// reader over ranged opens instead of the sequentially buffered
+	// stream used to identify the format - re-opening the whole archive
+	// per ReadAt would be far too slow. The buffered stream has served
+	// its purpose; drop it so the windowed fetches can take over the
+	// accounting for the archive transfer.
+	var source io.Reader = buffered
+	switch format.(type) {
+	case archives.Zip, archives.SevenZip:
+		tr.Reset(ctx)
+		source, err = newWindowedReader(ctx, srcObj, opts.windowSize, tr, options...)
+		if err != nil {
+			return err
+		}
+	}
+
 	// extract files
-	err = ex.Extract(ctx, in, func(ctx context.Context, f archives.FileInfo) error {
+	err = ex.Extract(ctx, source, func(ctx context.Context, f archives.FileInfo) error {
 		remote, err := destPath(f.NameInArchive, dstDir)
 		if err != nil {
 			return err
@@ -186,8 +272,18 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 		if err != nil {
 			return err
 		}
-		// extract the file to destination
-		_, err = operations.Rcat(ctx, dst, remote, fin, f.ModTime(), nil)
+		counter := &countingReadCloser{ReadCloser: fin}
+		// extract the file to destination; Rcat creates its own per-file
+		// transfer for the upload
+		obj, err := operations.Rcat(ctx, dst, remote, counter, f.ModTime(), nil)
+		if err == nil && f.Size() >= 0 && counter.n != f.Size() {
+			// The upload succeeded but the archive didn't contain as many
+			// bytes as it claims for the entry - don't keep the partial file.
+			if removeErr := obj.Remove(ctx); removeErr != nil {
+				fs.Debugf(nil, "Failed to remove incomplete %q: %v", remote, removeErr)
+			}
+			err = fmt.Errorf("archive entry %q: extracted %d bytes, expected %d (archive may be corrupt)", f.NameInArchive, counter.n, f.Size())
+		}
 		if err == nil {
 			filesExtracted++
 		}
@@ -197,6 +293,78 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 	fs.Infof(nil, "Total files extracted %d", filesExtracted)
 
 	return err
+}
+
+// applyOptions applies the password and continue-on-error options to the
+// identified format, returning the format to extract with.
+//
+// Formats wrapped in a CompressedArchive (e.g. tar.gz) get the options
+// applied to the inner archive. The password is only meaningful to RAR and
+// 7z archives, so an error is returned for other formats rather than
+// silently ignoring it.
+func applyOptions(format archives.Format, opts extractOptions) (archives.Format, error) {
+	if ca, ok := format.(archives.CompressedArchive); ok {
+		updated, err := applyExtractionOptions(ca.Extraction, opts)
+		if err != nil {
+			return nil, err
+		}
+		ca.Extraction = updated
+		return ca, nil
+	}
+	ex, ok := format.(archives.Extraction)
+	if !ok {
+		if opts.password != "" {
+			return nil, fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
+		}
+		return format, nil
+	}
+	return applyExtractionOptions(ex, opts)
+}
+
+// applyExtractionOptions applies password and continue-on-error to a single
+// extraction format. Continue-on-error is applied to every format which
+// supports it; the password is rejected for every format other than RAR and
+// 7z.
+func applyExtractionOptions(ex archives.Extraction, opts extractOptions) (archives.Extraction, error) {
+	switch f := ex.(type) {
+	case archives.Zip:
+		if opts.password != "" {
+			return nil, fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
+		}
+		if opts.continueOnError {
+			f.ContinueOnError = true
+		}
+		return f, nil
+	case archives.SevenZip:
+		if opts.password != "" {
+			f.Password = opts.password
+		}
+		if opts.continueOnError {
+			f.ContinueOnError = true
+		}
+		return f, nil
+	case archives.Rar:
+		if opts.password != "" {
+			f.Password = opts.password
+		}
+		if opts.continueOnError {
+			f.ContinueOnError = true
+		}
+		return f, nil
+	case archives.Tar:
+		if opts.password != "" {
+			return nil, fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
+		}
+		if opts.continueOnError {
+			f.ContinueOnError = true
+		}
+		return f, nil
+	default:
+		if opts.password != "" {
+			return nil, fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
+		}
+		return ex, nil
+	}
 }
 
 // destPath maps an archive entry name onto its destination remote within
