@@ -122,7 +122,10 @@ $ rclone tree partial
 RAR and 7z archives can be encrypted - use --archive-password to set
 the password.
 
-Spanned/multi-disk ZIPs and multi-part TAR archives are not supported.
+Multi-volume RAR and 7z archives (and encrypted multi-volume sets with
+--archive-password) are supported - the volumes are streamed from the
+remote in order, nothing is staged locally. Spanned/multi-disk ZIPs and
+multi-part TAR archives are not supported.
 
 The [archive backend](/archive/) can also be used to extract files. It
 can be used to read only mount archives also but it supports a
@@ -207,6 +210,17 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 	}
 	fs.Debugf(nil, "Extract %s/%s, format %s to %s", src.Root(), srcFile, strings.TrimPrefix(format.Extension(), "."), dst.Root())
 
+	// RAR opens its volumes by name from the remote through a small io/fs
+	// adapter - the volumes are streamed from the remote, never staged
+	// locally. Set Name and FS before the options are applied so they are
+	// carried through onto the format used for extraction.
+	if r, ok := format.(archives.Rar); ok {
+		tr.Reset(ctx)
+		r.Name = srcFile
+		r.FS = remoteFS{ctx: ctx, f: src, acc: tr}
+		format = r
+	}
+
 	// apply command options (password, continue on error) to the format
 	format, err = applyOptions(format, opts)
 	if err != nil {
@@ -227,12 +241,32 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 	// accounting for the archive transfer.
 	var source io.Reader = buffered
 	switch format.(type) {
-	case archives.Zip, archives.SevenZip:
+	case archives.Zip:
 		tr.Reset(ctx)
 		source, err = newWindowedReader(ctx, srcObj, opts.windowSize, tr, options...)
 		if err != nil {
 			return err
 		}
+	case archives.SevenZip:
+		tr.Reset(ctx)
+		if strings.HasSuffix(strings.ToLower(srcFile), ".001") {
+			volumes, totalSize, err := collectSevenZipVolumes(ctx, src, srcFile)
+			if err != nil {
+				return fmt.Errorf("failed to collect the 7z volume set for %q: %w", srcFile, err)
+			}
+			// The volume readers account the fetched bytes; the outer
+			// reader must not account them a second time.
+			source = newWindowedReaderFromFetch(ctx, totalSize, opts.windowSize, nil, concatFetch(ctx, volumes, opts.windowSize, tr, options...))
+		} else {
+			source, err = newWindowedReader(ctx, srcObj, opts.windowSize, tr, options...)
+			if err != nil {
+				return err
+			}
+		}
+	case archives.Rar:
+		// The stream is not used; the format reads its volumes from the
+		// remote via the FS set above.
+		source = nil
 	}
 
 	// extract files
