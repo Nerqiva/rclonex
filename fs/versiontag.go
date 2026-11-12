@@ -1,4 +1,2 @@
-package fs
-
-// VersionTag of rclone
-var VersionTag = "v1.77.0"
+// VersionTag of rclonex (fork of rclone)
+var VersionTag = "v2026.11.0-alpha.1"

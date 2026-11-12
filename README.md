@@ -1,3 +1,5 @@
+> **rclonex** — private fork of [rclone/rclone](https://github.com/rclone/rclone) adding streaming remote-to-remote archive extraction to `rclone archive extract`. Binary name: `rclonex`. See [Fork notes](#rclonex-fork-notes) below. All rclone copyright and the MIT license (see [COPYING](COPYING)) are preserved unchanged.
+
 <!-- markdownlint-disable-next-line first-line-heading no-inline-html -->
 [<img src="https://rclone.org/img/logo_on_light__horizontal_color.svg" width="50%" alt="rclone logo">](https://rclone.org/#gh-light-mode-only)
 <!-- markdownlint-disable-next-line no-inline-html -->
@@ -204,3 +206,25 @@ Please see the [rclone website](https://rclone.org/) for:
 
 This is free software under the terms of the MIT license (check the
 [COPYING file](/COPYING) included in this package).
+
+# rclonex fork notes
+
+`rclonex` is a private fork of [rclone/rclone](https://github.com/rclone/rclone). The only
+functional change is an extended `rclone archive extract` command supporting streaming
+remote-to-remote archive extraction (ZIP, TAR, TAR.GZ, RAR, RAR5, 7z, including
+multi-volume archives where technically possible). Extraction streams directly from the
+source remote to the destination remote — complete archives are never downloaded locally.
+
+- **Module path:** `github.com/rclone/rclone` (kept so upstream rebases stay a fast-forward merge).
+- **Binary name:** `rclonex` (built with `go build -o rclonex` / `make`).
+- **Versioning:** Calver, `vYYYY.MM.MICRO-alpha.N` (see `VERSION`). Each release is cut from a
+  dedicated `release/<tag>` branch; `main` tracks upstream `master` plus rclonex changes.
+- **Rebasing onto upstream:** `git fetch upstream && git rebase upstream/master main`, then run
+  `go test -short ./cmd/archive/... ./fs/... ./lib/...`. All rclonex-specific code lives in
+  `cmd/archive/extract/` (new files), `.github/workflows/rclonex.yml`, and docs; upstream files
+  are touched minimally to keep rebases mechanical.
+- **Issues and releases:** every change lands via PR; releases are tagged on release branches
+  and built by the `rclonex` GitHub Actions workflow.
+
+Attribution: rclone is © The rclone contributors, MIT licensed. See [COPYING](COPYING) and
+[NOTICE](NOTICE) if present. rclonex adds no license changes.
