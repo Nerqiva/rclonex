@@ -41,7 +41,13 @@ $ rclone tree remote:extracted
 └── file.txt
 ```
 
-The source or destination or both can be local or remote.
+The source or destination or both can be local or remote. The source
+archive is streamed - it is not downloaded to the local machine first.
+Formats which need random access (ZIP and 7z) are read through a sliding
+window cache of ranged reads; formats which are single pass (tar, tar.gz
+...) are read sequentially. Remotes which do not support range reads
+make ZIP and 7z archives fail with an explicit error rather than being
+accessed in some other way.
 
 Filters can be used to only extract certain files:
 
@@ -52,6 +58,13 @@ $ rclone tree partial
 └── dir
     └── bye.txt
 ```
+
+RAR and 7z archives can be encrypted - use --archive-password to set
+the password. Multi-volume RAR archives (.part1.rar, .part2.rar, ... or old-style .rar,
+.r00, ...) and split 7z archives (.7z.001, .7z.002, ...) are supported and are read
+from the source remote volume by volume.
+
+Spanned/multi-disk ZIPs and multi-part TAR archives are not supported.
 
 The [archive backend](/archive/) can also be used to extract files. It
 can be used to read only mount archives also but it supports a
@@ -65,7 +78,10 @@ rclone archive extract [flags] <source> <destination>
 ## Options
 
 ```
-  -h, --help   help for extract
+      --archive-continue-on-error   Continue on errors instead of aborting extraction
+      --archive-password string     Password for encrypted RAR and 7z archives
+      --archive-window-size int     Sliding window cache size in bytes for random-access archives (ZIP, 7z); 0 disables caching (default 16777216)
+  -h, --help                       help for extract
 ```
 
 See the [global flags page](/flags/) for global options not listed here.
