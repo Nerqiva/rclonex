@@ -19,7 +19,7 @@ for the archive formats supported.
 For example on this archive:
 
 ```
-$ rclone archive list --long remote:archive.zip
+$ rclonex archive list --long remote:archive.zip
         6 2025-10-30 09:46:23.000000000 file.txt
         0 2025-10-30 09:46:57.000000000 dir/
         4 2025-10-30 09:46:57.000000000 dir/bye.txt
@@ -28,13 +28,13 @@ $ rclone archive list --long remote:archive.zip
 You can run extract like this
 
 ```
-$ rclone archive extract remote:archive.zip remote:extracted
+$ rclonex archive extract remote:archive.zip remote:extracted
 ```
 
 Which gives this result
 
 ```
-$ rclone tree remote:extracted
+$ rclonex tree remote:extracted
 /
 ├── dir
 │   └── bye.txt
@@ -43,17 +43,19 @@ $ rclone tree remote:extracted
 
 The source or destination or both can be local or remote. The source
 archive is streamed - it is not downloaded to the local machine first.
-Formats which need random access (ZIP and 7z) are read through a sliding
-window cache of ranged reads; formats which are single pass (tar, tar.gz
-...) are read sequentially. Remotes which do not support range reads
-make ZIP and 7z archives fail with an explicit error rather than being
-accessed in some other way.
+Formats which need random access (ZIP, 7z and ISO9660 images) are read
+through a sliding window cache of ranged reads; formats which are single
+pass (tar, tar.gz ...) are read sequentially. Remotes which do not
+support range reads make ZIP, 7z and ISO9660 archives fail with an
+explicit error rather than being accessed in some other way. ISO9660
+images with Rock Ridge or Joliet extensions are supported, including
+their long filenames.
 
 Filters can be used to only extract certain files:
 
 ```
-$ rclone archive extract archive.zip partial --include "bye.*"
-$ rclone tree partial
+$ rclonex archive extract archive.zip partial --include "bye.*"
+$ rclonex tree partial
 /
 └── dir
     └── bye.txt
@@ -72,7 +74,7 @@ different set of archive formats to the archive commands.
 
 
 ```
-rclone archive extract [flags] <source> <destination>
+rclonex archive extract [flags] <source> <destination>
 ```
 
 ## Options
@@ -80,7 +82,7 @@ rclone archive extract [flags] <source> <destination>
 ```
       --archive-continue-on-error   Continue on errors instead of aborting extraction
       --archive-password string     Password for encrypted RAR and 7z archives
-      --archive-window-size int     Sliding window cache size in bytes for random-access archives (ZIP, 7z); 0 disables caching (default 16777216)
+      --archive-window-size int     Sliding window cache size in bytes for random-access archives (ZIP, 7z, ISO9660); 0 disables caching (default 16777216)
   -h, --help                       help for extract
 ```
 

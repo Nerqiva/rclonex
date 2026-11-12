@@ -80,7 +80,7 @@ for the archive formats supported.
 For example on this archive:
 
 |||
-$ rclone archive list --long remote:archive.zip
+$ rclonex archive list --long remote:archive.zip
         6 2025-10-30 09:46:23.000000000 file.txt
         0 2025-10-30 09:46:57.000000000 dir/
         4 2025-10-30 09:46:57.000000000 dir/bye.txt
@@ -89,13 +89,13 @@ $ rclone archive list --long remote:archive.zip
 You can run extract like this
 
 |||
-$ rclone archive extract remote:archive.zip remote:extracted
+$ rclonex archive extract remote:archive.zip remote:extracted
 |||
 
 Which gives this result
 
 |||
-$ rclone tree remote:extracted
+$ rclonex tree remote:extracted
 /
 ├── dir
 │   └── bye.txt
@@ -115,8 +115,8 @@ their long filenames.
 Filters can be used to only extract certain files:
 
 |||
-$ rclone archive extract archive.zip partial --include "bye.*"
-$ rclone tree partial
+$ rclonex archive extract archive.zip partial --include "bye.*"
+$ rclonex tree partial
 /
 └── dir
     └── bye.txt

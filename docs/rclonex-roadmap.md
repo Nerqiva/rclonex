@@ -1,7 +1,7 @@
 # rclonex roadmap and task tracking
 
-rclonex is a public fork of [rclone/rclone](https://github.com/rclone/rclone) whose only
-functional change is an extended `rclone archive extract` with streaming remote-to-remote
+rclonex is a public fork of rclone/rclone whose only
+functional change is an extended `rclonex archive extract` with streaming remote-to-remote
 archive extraction. This file tracks the work items. Tasks are tracked in this file and referenced from commits.
 
 ## Task list
@@ -17,16 +17,17 @@ archive extraction. This file tracks the work items. Tasks are tracked in this f
 | T7 | Documentation: fork/design notes, updated `archive extract` page, rebase guide, resource/limits discussion | done | this commit |
 | T8 | CI: full-suite regression on push, memory-bounded extraction test job, release workflow wiring (Calver tag → release branch → binaries + checksums) | pending | — |
 | T9 | First Calver alpha release `v2026.11.0-alpha.1` from `release/v2026.11.0-alpha.1` (release branch per version; the bootstrap pins the same string) | pending | — |
+| T10 | ISO9660 extraction (Rock Ridge/Joliet long names) via go-diskfs over the windowed range-read cache | done | this commit |
 
 ## Requirements coverage
 
-- **ZIP, TAR, TAR.GZ, RAR, RAR5, 7z (incl. multi-volume)**: TAR end-to-end verified by tests; ZIP/7z/RAR fixtures committed; multi-volume via T4/T5.
+- **ZIP, TAR, TAR.GZ, RAR, RAR5, 7z (incl. multi-volume), ISO9660**: TAR end-to-end verified by tests; ZIP/7z/RAR fixtures committed; multi-volume via T4/T5; ISO9660 via T10 (Rock Ridge/Joliet long names, `.rclonelink` symlinks with `--links`).
 - **Read directly from remotes, no mounting, no local staging**: extraction path never writes the archive to disk; random-access formats use ranged opens; single-pass formats stream.
 - **Streamed extraction to destination remotes**: `operations.Rcat` streams the decoded entry to the destination; no full entry buffered (rely on decoder buffering).
 - **RAM/storage minimization**: sliding-window cache (default 16 MiB) for random-access formats; hard fetch verification avoids giant spurious buffers; `--archive-window-size 0` available.
 - **Random access / solid archives**: ZIP and 7z solid extraction via `io.ReaderAt` + `io.Seeker` over the windowed reader.
 - **Progress reporting**: source-archive transfer (bytes downloaded, known total size) + per-file transfers created by `Rcat`; `--stats`/`--progress` work unchanged.
-- **Integrity**: decoder CRCs/checksums (ZIP CRC32, RAR CRC, 7z CRC, tar header checksum) + extracted-byte-count cross-check per entry + range-read exactness verification + `Rcat` short-write detection; partial files removed on mismatch. (Per-entry uploaded hashes are whatever the destination rclone does by default.)
+- **Integrity**: decoder CRCs/checksums (ZIP CRC32, RAR CRC, 7z CRC, tar header checksum) + extracted-byte-count cross-check per entry + range-read exactness verification + `Rcat` short-write detection; partial files removed on mismatch. (ISO9660 carries no checksums — entries are verified by byte count only. Per-entry uploaded hashes are whatever the destination rclone does by default.)
 - **Error handling**: corrupt archives fail with decoder errors; range-ignoring remotes fail with `errRangeNotSupported`-wrapped messages; missing RAR/7z volumes fail with explicit errors; unsupported spanned ZIP / multi-part TAR are rejected with clear messages (documented).
 - **Resource limits**: `--bwlimit` and `--low-level-retries` flow through unchanged; window cache bounds RAM; one fetch in flight (decoders are single-threaded); destination upload honors `--buffer-size` as before.
 - **Never silently fall back to downloading locally**: enforced by construction — there is no local-staging code path; a remote that can't serve exactly the requested range fails the extraction.

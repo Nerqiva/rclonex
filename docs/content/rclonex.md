@@ -6,8 +6,8 @@ versionIntroduced: v2026.11.0-alpha.1
 
 # rclonex fork notes
 
-`rclonex` is a public fork of [rclone/rclone](https://github.com/rclone/rclone) — a personal project, nowhere near production ready. Against a
-stock rclone it adds exactly one functional change: an **extended `rclone archive extract`**
+`rclonex` is a public fork of rclone/rclone — a personal project, nowhere near production ready. Against a
+stock rclone it adds exactly one functional change: an **extended `rclonex archive extract`**
 that streams archives directly from a source remote to a destination remote, without mounting
 and without ever staging the complete archive (or the extracted tree) on local disk.
 
@@ -25,6 +25,7 @@ and without ever staging the complete archive (or the extracted tree) on local d
 | Progress | one transfer for the whole archive | same, plus per-file transfers created by `Rcat` |
 | Integrity | decoder CRCs/checksums | same, plus per-entry extracted-byte-count cross-check (partial uploads removed on mismatch) |
 | Multi-volume archives | unsupported | RAR/RAR5 (`.partN.rar` and old `.r00` style) via rardecode `Name`+`FS` over the source remote; split 7z (`.001` …) via a concatenated half-ranged reader. Solid archives supported (they're ReaderAt-based) |
+| ISO9660 images | unsupported | extracted with go-diskfs (Rock Ridge and Joliet long names supported); detected by the `CD001` identifier and read through the same windowed range-read cache; per-entry byte-count cross-check (the format has no checksums); Rock Ridge symlinks extracted as `.rclonelink` files with `--links` |
 | Encrypted archives | no way to pass a password | `--archive-password` (RAR and 7z) |
 | Error tolerance | none (abort) | `--archive-continue-on-error` (map to the decoders' `ContinueOnError`) |
 
@@ -40,6 +41,7 @@ and without ever staging the complete archive (or the extracted tree) on local d
 - A remote whose ranged opens return wrong/missing byte counts → extraction fails with an explicit error naming the format/remote; there is **no** code path that downloads the archive locally first, ever.
 - Spanned/multi-disk ZIPs and multi-part TAR archives → rejected up front (the upstream decoders don't support them either).
 - 7z multi-volume sets are expected as `name.7z.001`, `.002`, … contiguous from `.001`; RAR volumes are resolved relative to the first volume's directory (both naming schemes).
+- ISO9660 images with a missing or corrupt root volume descriptor fail with an explicit error; plain (no extension) images expose only 8.3 uppercase names, as the format dictates.
 - Missing volumes, corrupt entries (decoder CRC), or short extracted byte counts → clear error; with `--archive-continue-on-error` the decoder logs and continues where the format supports it.
 
 ## Rebase guide
@@ -51,7 +53,7 @@ git rebase upstream/master main
 go test -short -timeout 20m ./...
 ```
 
-rclonex-specific code lives in `cmd/archive/extract/{reader,multivolume}.go` and
+rclonex-specific code lives in `cmd/archive/extract/{reader,multivolume,iso}.go` and
 `cmd/archive/extract/*_test.go`; upstream-only conflicts should be limited to `extract.go`'s
 `ArchiveExtract` and flag registration. Keep the upstream files' logic intact when resolving.
 
@@ -66,4 +68,4 @@ rclonex-specific code lives in `cmd/archive/extract/{reader,multivolume}.go` and
 
 - No local spool / temp-file fallback — by requirement, unsupported remote capabilities hard-fail instead.
 - No changes to any other command, backend, or the rc API.
-- No new dependencies (uses `mholt/archives` already vendored by upstream).
+- No new dependencies (uses `mholt/archives` and `diskfs/go-diskfs`, both already in `go.mod`).
