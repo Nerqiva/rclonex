@@ -31,6 +31,8 @@ jobs:
         with:
           go-version: '1.26.11'
           cache: true
+      - name: Install FUSE and NFS helpers (for mount tests)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fuse3 nfs-common
       - name: Build rclonex
         run: go build -o rclonex .
       - name: gofmt check
