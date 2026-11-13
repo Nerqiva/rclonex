@@ -153,6 +153,21 @@ func TestWindowedReaderWindowDisabled(t *testing.T) {
 	_, err = r.ReadAt(make([]byte, 100), 500)
 	require.NoError(t, err)
 	assert.Equal(t, 2, r.numFetches())
+	// Nothing is retained between reads
+	assert.Nil(t, r.buf)
+}
+
+func TestWindowedReaderWindowDisabledRangeNotSupported(t *testing.T) {
+	ctx := context.Background()
+	obj := &rangeIgnoringObject{data: testData(10000)}
+	r := testWindowedReader(t, ctx, obj, 0)
+
+	// A remote which ignores the Range header must be reported
+	// rather than serve the wrong bytes
+	_, err := r.ReadAt(make([]byte, 100), 500)
+	assert.ErrorIs(t, err, errRangeNotSupported)
+	_, err = r.ReadAt(make([]byte, 100), 0)
+	assert.ErrorIs(t, err, errRangeNotSupported)
 }
 
 func TestWindowedReaderSeek(t *testing.T) {

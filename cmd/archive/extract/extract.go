@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/bodgit/sevenzip"
 	"github.com/mholt/archives"
 	"github.com/rclone/rclone/cmd"
 	"github.com/rclone/rclone/cmd/archive"
@@ -270,6 +271,9 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 		if opts.password != "" {
 			return fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
 		}
+		// The probing stream is not used by the ISO path - release it
+		// before the (potentially long) extraction
+		_ = in0.Close()
 		fs.Debugf(nil, "Extract %s/%s, format iso to %s", src.Root(), srcFile, dst.Root())
 		tr.Reset(ctx)
 		source, err := newWindowedReader(ctx, srcObj, opts.windowSize, tr, options...)
@@ -324,6 +328,8 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 		if err != nil {
 			return err
 		}
+		// The probing stream is not used once the windowed reader takes over
+		_ = in0.Close()
 	case archives.SevenZip:
 		tr.Reset(ctx)
 		if strings.HasSuffix(strings.ToLower(srcFile), ".001") {
@@ -333,17 +339,20 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 			}
 			// The volume readers account the fetched bytes; the outer
 			// reader must not account them a second time.
-			source = newWindowedReaderFromFetch(ctx, totalSize, opts.windowSize, nil, concatFetch(ctx, volumes, opts.windowSize, tr, options...))
+			source = newWindowedReaderFromFetch(ctx, totalSize, opts.windowSize, nil, concatFetch(ctx, volumes, tr, options...))
 		} else {
 			source, err = newWindowedReader(ctx, srcObj, opts.windowSize, tr, options...)
 			if err != nil {
 				return err
 			}
 		}
+		// The probing stream is not used once the windowed reader takes over
+		_ = in0.Close()
 	case archives.Rar:
 		// The stream is not used; the format reads its volumes from the
 		// remote via the FS set above.
 		source = nil
+		_ = in0.Close()
 	}
 
 	// extract files
@@ -352,10 +361,26 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 			return f.Open()
 		})
 	})
+	err = encryptionHint(err, opts.password)
 
 	fs.Infof(nil, "Total files extracted %d", filesExtracted)
 
 	return err
+}
+
+// encryptionHint rewrites an error which indicates the archive is encrypted
+// into a more helpful one. The extraction library reports a missing or wrong
+// password as a low-level decrypt error, so this supplies the hint that
+// --archive-password exists. It returns err unchanged otherwise.
+func encryptionHint(err error, password string) error {
+	var re *sevenzip.ReadError
+	if !errors.As(err, &re) || !re.Encrypted {
+		return err
+	}
+	if password == "" {
+		return fmt.Errorf("archive is encrypted - use --archive-password to supply the password: %w", err)
+	}
+	return fmt.Errorf("failed to decrypt archive - the password supplied with --archive-password is incorrect (or the archive is corrupt): %w", err)
 }
 
 // applyOptions applies the password and continue-on-error options to the

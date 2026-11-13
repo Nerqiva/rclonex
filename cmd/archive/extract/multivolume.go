@@ -198,22 +198,25 @@ func collectSevenZipVolumes(ctx context.Context, src fs.Fs, srcFile string) ([]s
 // concatFetch returns the fetch closure for newWindowedReaderFromFetch
 // serving the concatenation of volumes as one stream. fetch(off, want)
 // returns a ReadCloser yielding exactly want bytes; the reads map onto
-// per-volume windowedReaders constructed lazily with the same acc and
-// options as the outer reader.
+// per-volume windowedReaders constructed lazily with direct ranged
+// fetches (no caching window) with the same acc and options as the
+// outer reader.
 //
 // The volume readers account the fetched bytes into acc; the outer reader
 // must be constructed without an accounting transfer or the bytes would be
-// counted twice. The volume sizes are known from collectSevenZipVolumes, so
-// a volume shrinking between Stat and Open surfaces as a short read and is
-// reported by the outer refill's exact-byte-count verification.
-func concatFetch(ctx context.Context, volumes []sevenZipVolume, windowSize int64, acc *accounting.Transfer, options ...fs.OpenOption) func(context.Context, int64, int64) (io.ReadCloser, error) {
+// counted twice. The per-volume readers keep no buffers of their own - the
+// outer reader's window is the cache - so the memory footprint does not
+// grow with the number of volumes. The volume sizes are known from
+// collectSevenZipVolumes, so a volume shrinking between Stat and Open
+// surfaces as a short read and is reported by the outer refill's
+// exact-byte-count verification.
+func concatFetch(ctx context.Context, volumes []sevenZipVolume, acc *accounting.Transfer, options ...fs.OpenOption) func(context.Context, int64, int64) (io.ReadCloser, error) {
 	state := &concatState{
-		ctx:        ctx,
-		volumes:    volumes,
-		windowSize: windowSize,
-		acc:        acc,
-		options:    options,
-		readers:    make([]*windowedReader, len(volumes)),
+		ctx:     ctx,
+		volumes: volumes,
+		acc:     acc,
+		options: options,
+		readers: make([]*windowedReader, len(volumes)),
 	}
 	return func(ctx context.Context, off, want int64) (io.ReadCloser, error) {
 		if off < 0 || want < 0 {
@@ -224,21 +227,22 @@ func concatFetch(ctx context.Context, volumes []sevenZipVolume, windowSize int64
 }
 
 // concatState holds the volumes and the lazily constructed per-volume
-// windowed readers shared by all concatVolumesReaders.
+// windowed readers shared by all concatVolumesReaders. The per-volume
+// readers fetch spans directly and retain no bytes, so keeping them
+// forever costs nothing.
 type concatState struct {
-	ctx        context.Context
-	volumes    []sevenZipVolume
-	windowSize int64
-	acc        *accounting.Transfer
-	options    []fs.OpenOption
-	readers    []*windowedReader
+	ctx     context.Context
+	volumes []sevenZipVolume
+	acc     *accounting.Transfer
+	options []fs.OpenOption
+	readers []*windowedReader
 }
 
 // readerFor returns the windowed reader for volume i, constructing it on
 // first use.
 func (s *concatState) readerFor(i int) (*windowedReader, error) {
 	if s.readers[i] == nil {
-		r, err := newWindowedReader(s.ctx, s.volumes[i].obj, s.windowSize, s.acc, s.options...)
+		r, err := newWindowedReader(s.ctx, s.volumes[i].obj, 0, s.acc, s.options...)
 		if err != nil {
 			return nil, err
 		}

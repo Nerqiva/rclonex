@@ -105,18 +105,19 @@ func (w *windowedReader) ReadAt(p []byte, off int64) (int, error) {
 		if off >= w.size {
 			return total, io.EOF
 		}
-		if !w.inWindow(off) || w.windowSize == 0 {
-			remaining := int64(len(p) - total)
-			if want := w.size - off; remaining > want {
-				remaining = want
+		if w.windowSize == 0 {
+			n, err := w.fetchSpan(p[total:], off)
+			total += n
+			off += int64(n)
+			if err != nil {
+				return total, err
 			}
+			continue
+		}
+		if !w.inWindow(off) {
 			want := w.windowSize
 			if want > w.size-off {
 				want = w.size - off
-			}
-			if want <= 0 {
-				// Windowing disabled: fetch exactly the requested span
-				want = remaining
 			}
 			if err := w.refill(off, want); err != nil {
 				return total, err
@@ -166,6 +167,41 @@ func (w *windowedReader) Seek(offset int64, whence int) (int64, error) {
 	return abs, nil
 }
 
+// fetchSpan reads min(len(p), size-off) bytes starting at off directly
+// into p, verifying the remote returns exactly that many bytes - a
+// remote which ignores the Range header is reported as
+// errRangeNotSupported rather than silently serving the wrong bytes.
+// Nothing is retained in w.buf.
+func (w *windowedReader) fetchSpan(p []byte, off int64) (int, error) {
+	want := int64(len(p))
+	if remaining := w.size - off; remaining < want {
+		want = remaining
+	}
+	rangeEnd := off + want - 1
+	rc, err := w.fetch(w.ctx, off, want)
+	if err != nil {
+		return 0, fmt.Errorf("failed to open range %d-%d: %w", off, rangeEnd, err)
+	}
+	if w.acc != nil {
+		rc = w.acc.Account(w.ctx, rc)
+	}
+	n, readErr := io.ReadFull(rc, p[:want])
+	var extra [1]byte
+	extraN, _ := rc.Read(extra[:])
+	closeErr := rc.Close()
+	w.fetches++
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		return n, fmt.Errorf("failed to read range %d-%d: %w", off, rangeEnd, readErr)
+	}
+	if int64(n) != want || extraN > 0 {
+		return n, fmt.Errorf("remote does not appear to support range reads (requested %d bytes at offset %d): %w", want, off, errRangeNotSupported)
+	}
+	if closeErr != nil {
+		return n, fmt.Errorf("failed to close range %d-%d: %w", off, rangeEnd, closeErr)
+	}
+	return int(want), nil
+}
+
 // inWindow returns true if off is inside the current window.
 func (w *windowedReader) inWindow(off int64) bool {
 	return off >= w.bufOff && off < w.bufOff+int64(len(w.buf))
@@ -184,19 +220,22 @@ func (w *windowedReader) refill(off, want int64) error {
 	if w.acc != nil {
 		rc = w.acc.Account(w.ctx, rc)
 	}
-	got, err := io.ReadAll(io.LimitReader(rc, want+1))
+	// Preallocate the read buffer - ReadFull spares the growth
+	// transient an io.ReadAll of the same span would incur
+	got := make([]byte, want+1)
+	n, readErr := io.ReadFull(rc, got)
 	closeErr := rc.Close()
 	w.fetches++
-	if err != nil {
-		return fmt.Errorf("failed to read range %d-%d: %w", off, end, err)
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("failed to read range %d-%d: %w", off, end, readErr)
 	}
-	if int64(len(got)) != want {
+	if int64(n) != want {
 		return fmt.Errorf("remote does not appear to support range reads (requested %d bytes at offset %d): %w", want, off, errRangeNotSupported)
 	}
 	if closeErr != nil {
 		return fmt.Errorf("failed to close range %d-%d: %w", off, end, closeErr)
 	}
-	w.buf = got
+	w.buf = got[:want]
 	w.bufOff = off
 	return nil
 }

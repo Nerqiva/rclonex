@@ -124,6 +124,45 @@ func TestArchiveExtractLargeTarGz(t *testing.T) {
 	}
 }
 
+// TestArchiveExtractLargeSevenZipMultiVolume extracts a multi-volume 7z
+// archive of a 48 MiB constant payload. The committed testdata/bigmv.7z.001..004
+// fixture is tiny (the payload is highly compressible) yet still exercises
+// the full extraction path.
+//
+// Note peak RSS is a process-wide high-water mark, so - as with the other
+// large file tests - the budget must be generous; the focused regression
+// check for the window reader's memory retention is in reader_test.go.
+func TestArchiveExtractLargeSevenZipMultiVolume(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping large file test in -short mode")
+	}
+	const payloadSize = 48 << 20 // 48 MiB of 'a' bytes
+
+	ctx := context.Background()
+
+	dstDir := t.TempDir()
+	dst, err := fs.NewFs(ctx, dstDir)
+	require.NoError(t, err)
+	src := memoryFs(t, "src")
+	uploadFixtureVolumes(t, ctx, src, "", "bigmv.7z.001", "bigmv.7z.002", "bigmv.7z.003", "bigmv.7z.004")
+
+	m := md5.New()
+	_, err = io.CopyN(m, patternReader{b: 0x61}, payloadSize)
+	require.NoError(t, err)
+	expect := [16]byte(m.Sum(nil))
+
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "bigmv.7z.001"))
+	checkLargeExtraction(t, dstDir, "payload.bin", payloadSize, expect)
+
+	if rss := peakRSSBytes(t); rss > 0 {
+		const maxRSS = 512 << 20 // 512 MiB
+		if rss > maxRSS {
+			t.Fatalf("extraction peak RSS %d bytes exceeds budget %d", rss, maxRSS)
+		}
+		t.Logf("peak RSS: %d MiB (budget 512 MiB)", rss>>20)
+	}
+}
+
 func TestArchiveExtractLargeZipRandomAccess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large file test in -short mode")

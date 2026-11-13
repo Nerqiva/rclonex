@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -272,7 +273,7 @@ func TestArchiveExtractRangeNotSupported(t *testing.T) {
 }
 
 func TestArchiveExtractPassword(t *testing.T) {
-	for _, name := range []string{"encrypted.7z", "encrypted.rar"} {
+	for _, name := range []string{"encrypted.7z", "encrypted-files.7z", "encrypted.rar"} {
 		for _, tc := range []struct {
 			name     string
 			password string
@@ -294,6 +295,11 @@ func TestArchiveExtractPassword(t *testing.T) {
 				err = ArchiveExtract(ctx, dst, "", src, name)
 				if tc.wantErr {
 					assert.Error(t, err)
+					if strings.HasSuffix(name, ".7z") {
+						// the extraction library reports a missing or wrong
+						// password as a low-level error - check the hint is there
+						assert.Contains(t, err.Error(), "--archive-password")
+					}
 					return
 				}
 				require.NoError(t, err)
