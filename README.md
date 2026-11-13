@@ -263,9 +263,6 @@ rclonex archive extract --include "docs/**" remote:archive.zip dest:extracted
 # shrink the sliding window (or disable caching entirely)
 rclonex archive extract --archive-window-size 4194304 remote:archive.zip dest:extracted
 rclonex archive extract --archive-window-size 0 remote:archive.zip dest:extracted
-
-# keep going when one entry fails (e.g. corrupt entry inside an archive)
-rclonex archive extract --archive-continue-on-error remote:broken.tar dest:extracted
 ```
 
 ### Flags added by rclonex
@@ -273,13 +270,14 @@ rclonex archive extract --archive-continue-on-error remote:broken.tar dest:extra
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--archive-password` | empty | Password for encrypted RAR and 7z archives (applies to multi-volume sets too) |
-| `--archive-continue-on-error` | `false` | Continue extraction when an entry fails, instead of aborting |
-| `--archive-window-size` | `16777216` (16 MiB) | Sliding-window cache size in bytes for random-access formats (ZIP, 7z, ISO9660); `0` disables caching — every read performs a direct ranged fetch of exactly the requested span |
+| `--archive-window-size` | `16777216` (16 MiB) | Sliding-window cache size in bytes for random-access formats (ZIP, 7z, ISO9660); `0` disables caching — every read performs a direct ranged fetch of exactly the requested span and retains nothing |
 
 ### Guarantees and limits
 
 - **No local staging, ever.** Random-access formats are read through a sliding window of ranged reads; single-pass formats are streamed. There is no code path that downloads the archive to local disk first.
 - **Verified ranged reads.** For cached reads the remote is required to return exactly the requested byte count — a remote that ignores the `Range` header fails with an explicit error (`remote does not appear to support range reads`) instead of silently serving wrong data.
+- **Bounded memory.** The sliding window is capped by `--archive-window-size`; with `0`, every read fetches exactly the requested span and retains nothing between reads. For split 7z archives the per-volume readers fetch directly with no buffers of their own, so memory does not grow with the number of volumes.
+- **Encrypted archives.** A missing or wrong `--archive-password` for an encrypted 7z archive is reported as an actionable error naming the flag, not a low-level decoder message. Extraction aborts on the first entry failure.
 - **Integrity.** Decoder checksums (ZIP CRC32, RAR CRC, 7z CRC, tar header checksum) plus a per-entry extracted-byte-count cross-check; partial files are removed on mismatch. ISO9660 has no checksums — entries are verified by byte count only.
 - **Progress.** Transfers from the source remote and per-file destination transfers are reported as usual; `--stats`/`--progress` work unchanged. `--bwlimit` and `--low-level-retries` flow through unchanged.
 - Archive entry names are sanitized against path traversal (Zip Slip) exactly as upstream does.

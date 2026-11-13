@@ -27,7 +27,6 @@ and without ever staging the complete archive (or the extracted tree) on local d
 | Multi-volume archives | unsupported | RAR/RAR5 (`.partN.rar` and old `.r00` style) via rardecode `Name`+`FS` over the source remote; split 7z (`.001` …) via a concatenated half-ranged reader. Solid archives supported (they're ReaderAt-based) |
 | ISO9660 images | unsupported | extracted with go-diskfs (Rock Ridge and Joliet long names supported); detected by the `CD001` identifier and read through the same windowed range-read cache; per-entry byte-count cross-check (the format has no checksums); Rock Ridge symlinks extracted as `.rclonelink` files with `--links` |
 | Encrypted archives | no way to pass a password | `--archive-password` (RAR and 7z) |
-| Error tolerance | none (abort) | `--archive-continue-on-error` (map to the decoders' `ContinueOnError`) |
 
 ## Safety rules kept from upstream
 
@@ -42,7 +41,7 @@ and without ever staging the complete archive (or the extracted tree) on local d
 - Spanned/multi-disk ZIPs and multi-part TAR archives → rejected up front (the upstream decoders don't support them either).
 - 7z multi-volume sets are expected as `name.7z.001`, `.002`, … contiguous from `.001`; RAR volumes are resolved relative to the first volume's directory (both naming schemes).
 - ISO9660 images with a missing or corrupt root volume descriptor fail with an explicit error; plain (no extension) images expose only 8.3 uppercase names, as the format dictates.
-- Missing volumes, corrupt entries (decoder CRC), or short extracted byte counts → clear error; with `--archive-continue-on-error` the decoder logs and continues where the format supports it.
+- Missing volumes, corrupt entries (decoder CRC), or short extracted byte counts → clear error; extraction aborts on the first failing entry.
 
 ## Rebase guide
 

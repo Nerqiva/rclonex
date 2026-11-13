@@ -135,10 +135,9 @@ func (i isoStorageFileInfo) Sys() any { return nil }
 // flag is set, in which case they are extracted as .rclonelink files
 // holding the link target.
 //
-// If continueOnError is set then an entry which fails to extract is
-// logged and the walk continues; the first error aborts the walk
-// otherwise.
-func extractISO(ctx context.Context, source *windowedReader, size int64, continueOnError bool, handle func(nameInArchive string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error) (err error) {
+// If an entry fails to extract the walk aborts and the first error is
+// returned.
+func extractISO(ctx context.Context, source *windowedReader, size int64, handle func(nameInArchive string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error) (err error) {
 	defer recoverParsePanic(&err)
 	links := fs.GetConfig(ctx).Links
 	fsys, err := iso9660.Read(&isoStorage{r: source, size: size}, size, 0, 0)
@@ -147,15 +146,6 @@ func extractISO(ctx context.Context, source *windowedReader, size int64, continu
 	}
 	skipped := 0
 	skippedLinks := 0
-	// fail stores the error if continueOnError is set, logging it and
-	// returning nil so the walk continues; otherwise it returns the error
-	fail := func(name string, err error) error {
-		if !continueOnError {
-			return err
-		}
-		fs.Errorf(nil, "Failed to extract %q: %v", name, err)
-		return nil
-	}
 	var walk func(dir string) error
 	walk = func(dir string) error {
 		entries, err := fsys.ReadDir(dir)
@@ -164,7 +154,7 @@ func extractISO(ctx context.Context, source *windowedReader, size int64, continu
 				// Nothing can be extracted without the root directory
 				return fmt.Errorf("failed to read the root directory of the ISO: %w", err)
 			}
-			return fail(dir, fmt.Errorf("failed to read directory %q in the ISO: %w", dir, err))
+			return fmt.Errorf("failed to read directory %q in the ISO: %w", dir, err)
 		}
 		for _, entry := range entries {
 			rel := entry.Name()
@@ -179,16 +169,13 @@ func extractISO(ctx context.Context, source *windowedReader, size int64, continu
 			}
 			info, err := entry.Info()
 			if err != nil {
-				if err := fail(rel, fmt.Errorf("failed to stat ISO entry %q: %w", rel, err)); err != nil {
-					return err
-				}
-				continue
+				return fmt.Errorf("failed to stat ISO entry %q: %w", rel, err)
 			}
 			isDir := entry.IsDir()
 			isLink := info.Mode()&os.ModeSymlink != 0
 			switch {
 			case isDir:
-				if err := fail(rel, handle(rel+"/", 0, info.ModTime(), true, nil)); err != nil {
+				if err := handle(rel+"/", 0, info.ModTime(), true, nil); err != nil {
 					return err
 				}
 				if err := walk(rel); err != nil {
@@ -204,7 +191,7 @@ func extractISO(ctx context.Context, source *windowedReader, size int64, continu
 				open := func() (io.ReadCloser, error) {
 					return io.NopCloser(strings.NewReader(target)), nil
 				}
-				if err := fail(rel, handle(rel+fs.LinkSuffix, int64(len(target)), info.ModTime(), false, open)); err != nil {
+				if err := handle(rel+fs.LinkSuffix, int64(len(target)), info.ModTime(), false, open); err != nil {
 					return err
 				}
 			case isLink:
@@ -220,7 +207,7 @@ func extractISO(ctx context.Context, source *windowedReader, size int64, continu
 					}
 					return recoveringReadCloser{node}, nil
 				}
-				if err := fail(rel, handle(rel, info.Size(), info.ModTime(), false, open)); err != nil {
+				if err := handle(rel, info.Size(), info.ModTime(), false, open); err != nil {
 					return err
 				}
 			}

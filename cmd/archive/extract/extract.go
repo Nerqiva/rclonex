@@ -26,15 +26,13 @@ import (
 )
 
 var (
-	archivePassword        string
-	archiveContinueOnError bool
-	archiveWindowSize      int64
+	archivePassword   string
+	archiveWindowSize int64
 )
 
 func init() {
 	flagSet := Command.Flags()
 	flags.StringVarP(flagSet, &archivePassword, "archive-password", "", "", "Password for encrypted RAR and 7z archives", "")
-	flags.BoolVarP(flagSet, &archiveContinueOnError, "archive-continue-on-error", "", false, "Continue on errors instead of aborting extraction", "")
 	flags.Int64VarP(flagSet, &archiveWindowSize, "archive-window-size", "", 16<<20, "Sliding window cache size in bytes for random-access archives (ZIP, 7z, ISO9660); 0 disables caching", "")
 	archive.Command.AddCommand(Command)
 }
@@ -43,9 +41,8 @@ func init() {
 // ArchiveExtract. It is stored in the context, mirroring how the filter
 // config travels.
 type extractOptions struct {
-	password        string
-	continueOnError bool
-	windowSize      int64
+	password   string
+	windowSize int64
 }
 
 const defaultWindowSize = 16 << 20
@@ -143,9 +140,8 @@ different set of archive formats to the archive commands.
 		cmd.CheckArgs(2, 2, command, args)
 
 		opts := extractOptions{
-			password:        archivePassword,
-			continueOnError: archiveContinueOnError,
-			windowSize:      archiveWindowSize,
+			password:   archivePassword,
+			windowSize: archiveWindowSize,
 		}
 
 		src, srcFile := cmd.NewFsFile(args[0])
@@ -280,7 +276,7 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 		if err != nil {
 			return err
 		}
-		err = extractISO(ctx, source, srcObj.Size(), opts.continueOnError, handleEntry)
+		err = extractISO(ctx, source, srcObj.Size(), handleEntry)
 		fs.Infof(nil, "Total files extracted %d", filesExtracted)
 		return err
 	}
@@ -302,7 +298,7 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 		format = r
 	}
 
-	// apply command options (password, continue on error) to the format
+	// apply command options (password) to the format
 	format, err = applyOptions(format, opts)
 	if err != nil {
 		return err
@@ -383,10 +379,10 @@ func encryptionHint(err error, password string) error {
 	return fmt.Errorf("failed to decrypt archive - the password supplied with --archive-password is incorrect (or the archive is corrupt): %w", err)
 }
 
-// applyOptions applies the password and continue-on-error options to the
+// applyOptions applies the password option to the
 // identified format, returning the format to extract with.
 //
-// Formats wrapped in a CompressedArchive (e.g. tar.gz) get the options
+// Formats wrapped in a CompressedArchive (e.g. tar.gz) get the option
 // applied to the inner archive. The password is only meaningful to RAR and
 // 7z archives, so an error is returned for other formats rather than
 // silently ignoring it.
@@ -409,42 +405,28 @@ func applyOptions(format archives.Format, opts extractOptions) (archives.Format,
 	return applyExtractionOptions(ex, opts)
 }
 
-// applyExtractionOptions applies password and continue-on-error to a single
-// extraction format. Continue-on-error is applied to every format which
-// supports it; the password is rejected for every format other than RAR and
-// 7z.
+// applyExtractionOptions applies the password to a single extraction
+// format. The password is rejected for every format other than RAR and 7z.
 func applyExtractionOptions(ex archives.Extraction, opts extractOptions) (archives.Extraction, error) {
 	switch f := ex.(type) {
 	case archives.Zip:
 		if opts.password != "" {
 			return nil, fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
 		}
-		if opts.continueOnError {
-			f.ContinueOnError = true
-		}
 		return f, nil
 	case archives.SevenZip:
 		if opts.password != "" {
 			f.Password = opts.password
-		}
-		if opts.continueOnError {
-			f.ContinueOnError = true
 		}
 		return f, nil
 	case archives.Rar:
 		if opts.password != "" {
 			f.Password = opts.password
 		}
-		if opts.continueOnError {
-			f.ContinueOnError = true
-		}
 		return f, nil
 	case archives.Tar:
 		if opts.password != "" {
 			return nil, fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
-		}
-		if opts.continueOnError {
-			f.ContinueOnError = true
 		}
 		return f, nil
 	default:

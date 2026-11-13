@@ -322,52 +322,47 @@ func TestArchiveExtractPassword(t *testing.T) {
 }
 
 func TestApplyOptions(t *testing.T) {
-	opts := func(password string, continueOnError bool) extractOptions {
-		return extractOptions{password: password, continueOnError: continueOnError}
+	opts := func(password string) extractOptions {
+		return extractOptions{password: password}
 	}
 
 	t.Run("rar with password", func(t *testing.T) {
-		got, err := applyOptions(archives.Rar{}, opts("secret", false))
+		got, err := applyOptions(archives.Rar{}, opts("secret"))
 		require.NoError(t, err)
 		assert.Equal(t, archives.Rar{Password: "secret"}, got)
 	})
-	t.Run("rar with password and continue on error", func(t *testing.T) {
-		got, err := applyOptions(archives.Rar{}, opts("secret", true))
+	t.Run("7z with password", func(t *testing.T) {
+		got, err := applyOptions(archives.SevenZip{}, opts("secret"))
 		require.NoError(t, err)
-		assert.Equal(t, archives.Rar{Password: "secret", ContinueOnError: true}, got)
+		assert.Equal(t, archives.SevenZip{Password: "secret"}, got)
 	})
-	t.Run("7z with password and continue on error", func(t *testing.T) {
-		got, err := applyOptions(archives.SevenZip{}, opts("secret", true))
+	t.Run("zip without password", func(t *testing.T) {
+		got, err := applyOptions(archives.Zip{}, opts(""))
 		require.NoError(t, err)
-		assert.Equal(t, archives.SevenZip{Password: "secret", ContinueOnError: true}, got)
+		assert.Equal(t, archives.Zip{}, got)
 	})
-	t.Run("zip with continue on error", func(t *testing.T) {
-		got, err := applyOptions(archives.Zip{}, opts("", true))
+	t.Run("tar without password", func(t *testing.T) {
+		got, err := applyOptions(archives.Tar{}, opts(""))
 		require.NoError(t, err)
-		assert.Equal(t, archives.Zip{ContinueOnError: true}, got)
-	})
-	t.Run("tar with continue on error", func(t *testing.T) {
-		got, err := applyOptions(archives.Tar{}, opts("", true))
-		require.NoError(t, err)
-		assert.Equal(t, archives.Tar{ContinueOnError: true}, got)
+		assert.Equal(t, archives.Tar{}, got)
 	})
 	t.Run("zip with password rejected", func(t *testing.T) {
-		_, err := applyOptions(archives.Zip{}, opts("secret", false))
+		_, err := applyOptions(archives.Zip{}, opts("secret"))
 		require.Error(t, err)
 	})
 	t.Run("tar with password rejected", func(t *testing.T) {
-		_, err := applyOptions(archives.Tar{}, opts("secret", false))
+		_, err := applyOptions(archives.Tar{}, opts("secret"))
 		require.Error(t, err)
 	})
 	t.Run("compressed archive with rar inside gets password", func(t *testing.T) {
-		got, err := applyOptions(archives.CompressedArchive{Extraction: archives.Rar{}, Compression: archives.Gz{}}, opts("secret", true))
+		got, err := applyOptions(archives.CompressedArchive{Extraction: archives.Rar{}, Compression: archives.Gz{}}, opts("secret"))
 		require.NoError(t, err)
 		ca, ok := got.(archives.CompressedArchive)
 		require.True(t, ok)
-		assert.Equal(t, archives.Rar{Password: "secret", ContinueOnError: true}, ca.Extraction)
+		assert.Equal(t, archives.Rar{Password: "secret"}, ca.Extraction)
 	})
 	t.Run("compressed archive with zip inside rejects password", func(t *testing.T) {
-		_, err := applyOptions(archives.CompressedArchive{Extraction: archives.Zip{}, Compression: archives.Gz{}}, opts("secret", false))
+		_, err := applyOptions(archives.CompressedArchive{Extraction: archives.Zip{}, Compression: archives.Gz{}}, opts("secret"))
 		require.Error(t, err)
 	})
 }
