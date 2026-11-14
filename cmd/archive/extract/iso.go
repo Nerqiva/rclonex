@@ -31,6 +31,11 @@ import (
 // 1 byte into the descriptor.
 const isoMagicOffset = int64(0x8001)
 
+// iso9660SectorSize is the block size of an ISO9660 image as passed to
+// iso9660.Read - location numbers in directory entries are in these
+// blocks.
+const iso9660SectorSize = int64(2048)
+
 var isoMagic = []byte("CD001")
 
 // probeISO reports whether the bytes at isoMagicOffset look like an
@@ -200,7 +205,16 @@ func extractISO(ctx context.Context, source *windowedReader, size int64, handle 
 				fs.Debugf(nil, "Skipping ISO entry %q - not a regular file", rel)
 				skipped++
 			default:
+				// Read the file's extent straight from the image.
+				// Opening through the filesystem would re-read and
+				// re-parse the parent directory on every file.
 				open := func() (io.ReadCloser, error) {
+					if st, ok := info.Sys().(*iso9660.StatT); ok {
+						if st.Location == 0 && info.Size() > 0 {
+							return nil, fmt.Errorf("ISO entry %q has extent location 0 - the image appears corrupt", rel)
+						}
+						return io.NopCloser(io.NewSectionReader(source, int64(st.Location)*iso9660SectorSize, info.Size())), nil
+					}
 					node, err := fsys.OpenFile(toIOFS(rel), os.O_RDONLY)
 					if err != nil {
 						return nil, err

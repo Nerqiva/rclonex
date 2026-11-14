@@ -72,11 +72,9 @@ Memory usage is mostly determined by how much of the archive's metadata
 and coding the libraries must hold in memory, not by the size of the
 files being extracted:
 
-- ISO9660 images: every file that is opened re-reads and re-parses its
-  parent directory, so both memory usage and extraction time grow with
-  the size of the largest directory in the image. A flat image holding
-  20000 files can use more than 250 MiB of memory (and takes much
-  longer to extract). Prefer images with modest directory sizes.
+- ISO9660 images: directories are parsed once as they are walked
+  during extraction, so extraction time and memory usage do not depend
+  on how many files a single directory holds.
 - 7z archives: the whole archive header is parsed before any file is
   extracted, so memory grows with the number of entries - roughly
   140 MiB for 60000 tiny files. The LZMA/LZMA2 dictionary declared by
