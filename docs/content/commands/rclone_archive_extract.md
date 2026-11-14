@@ -68,6 +68,31 @@ from the source remote volume by volume.
 
 Spanned/multi-disk ZIPs and multi-part TAR archives are not supported.
 
+Memory usage is mostly determined by how much of the archive's metadata
+and coding the libraries must hold in memory, not by the size of the
+files being extracted:
+
+- ISO9660 images: every file that is opened re-reads and re-parses its
+  parent directory, so both memory usage and extraction time grow with
+  the size of the largest directory in the image. A flat image holding
+  20000 files can use more than 250 MiB of memory (and takes much
+  longer to extract). Prefer images with modest directory sizes.
+- 7z archives: the whole archive header is parsed before any file is
+  extracted, so memory grows with the number of entries - roughly
+  140 MiB for 60000 tiny files. The LZMA/LZMA2 dictionary declared by
+  the archive is always allocated in full and there is no way to shrink
+  it - an archive built with a 128 MiB dictionary needs around that
+  much memory again.
+- ZIP archives: the central directory is loaded into memory, so memory
+  grows with the number of entries - roughly 220 MiB to extract an
+  archive holding 200000 files.
+- Single-pass formats (tar, tar.gz ...) stream and stay flat regardless
+  of the number of files.
+
+`--archive-window-size` only limits the random-access read cache used for
+the archive's metadata blocks (16 MiB by default; 0 disables caching).
+It does not limit the dictionary or metadata memory described above.
+
 The [archive backend](/archive/) can also be used to extract files. It
 can be used to read only mount archives also but it supports a
 different set of archive formats to the archive commands.
