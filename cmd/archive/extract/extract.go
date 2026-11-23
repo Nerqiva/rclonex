@@ -28,12 +28,14 @@ import (
 var (
 	archivePassword   string
 	archiveWindowSize int64
+
+	errPasswordUnsupported = errors.New("--archive-password is only supported for RAR and 7z archives")
 )
 
 func init() {
 	flagSet := Command.Flags()
 	flags.StringVarP(flagSet, &archivePassword, "archive-password", "", "", "Password for encrypted RAR and 7z archives", "")
-	flags.Int64VarP(flagSet, &archiveWindowSize, "archive-window-size", "", 16<<20, "Sliding window cache size in bytes for random-access archives (ZIP, 7z, ISO9660); 0 disables caching", "")
+	flags.Int64VarP(flagSet, &archiveWindowSize, "archive-window-size", "", defaultWindowSize, "Sliding window cache size in bytes for random-access archives (ZIP, 7z, ISO9660); 0 disables caching", "")
 	archive.Command.AddCommand(Command)
 }
 
@@ -188,7 +190,7 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 	opts := extractOptionsFrom(ctx)
 	// get source object
 	srcObj, err = src.NewObject(ctx, srcFile)
-	fs.Debugf(nil, "srcFile: %q, src : %v", srcFile, src)
+	fs.Debugf(nil, "srcFile: %q, src: %v", srcFile, src)
 	if errors.Is(err, fs.ErrorIsDir) {
 		return fmt.Errorf("source can't be a directory: %w", err)
 	} else if errors.Is(err, fs.ErrorObjectNotFound) {
@@ -288,7 +290,7 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 	// and 7z they are read through a windowed reader over ranged opens.
 	if probeISO(in, srcObj.Size()) {
 		if opts.password != "" {
-			return fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
+			return errPasswordUnsupported
 		}
 		// The probing stream is not used by the ISO path - release it
 		// before the (potentially long) extraction
@@ -421,7 +423,7 @@ func applyOptions(format archives.Format, opts extractOptions) (archives.Format,
 	ex, ok := format.(archives.Extraction)
 	if !ok {
 		if opts.password != "" {
-			return nil, fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
+			return nil, errPasswordUnsupported
 		}
 		return format, nil
 	}
@@ -434,7 +436,7 @@ func applyExtractionOptions(ex archives.Extraction, opts extractOptions) (archiv
 	switch f := ex.(type) {
 	case archives.Zip:
 		if opts.password != "" {
-			return nil, fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
+			return nil, errPasswordUnsupported
 		}
 		return f, nil
 	case archives.SevenZip:
@@ -449,12 +451,12 @@ func applyExtractionOptions(ex archives.Extraction, opts extractOptions) (archiv
 		return f, nil
 	case archives.Tar:
 		if opts.password != "" {
-			return nil, fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
+			return nil, errPasswordUnsupported
 		}
 		return f, nil
 	default:
 		if opts.password != "" {
-			return nil, fmt.Errorf("--archive-password is only supported for RAR and 7z archives")
+			return nil, errPasswordUnsupported
 		}
 		return ex, nil
 	}
