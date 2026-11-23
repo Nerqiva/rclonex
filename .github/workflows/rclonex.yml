@@ -2,7 +2,7 @@
 # rclonex CI: tests, regression, cross-platform builds, releases.
 # Kept separate from the upstream "build" workflow so upstream rebases stay mechanical.
 
-name: rclonex
+name: RcloneX: Test, Build & Release
 
 on:
   push:
@@ -107,7 +107,7 @@ jobs:
 
   release:
     name: release
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     needs: [test, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -130,17 +130,34 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Pre-release only for suffixed tags (e.g. -alpha.1) so plain CalVer
-          # tags become full releases and releases/latest resolves for them.
-          prerelease=
-          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=--prerelease; fi
-          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            # Idempotent re-runs (e.g. after a tag move): drop the old
-            # assets so only correctly named ones remain, then upload.
-            for a in $(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
-              gh release delete-asset "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" "$a" --yes
-            done
-            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" rclonex_* checksums.txt install.sh
+          # Tag pushes release the tag name; pushes to main and manual runs
+          # release the version in the VERSION file.
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="$GITHUB_REF_NAME"
           else
-            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --generate-notes $prerelease --title "$GITHUB_REF_NAME" rclonex_* checksums.txt install.sh
+            TAG="$(cat VERSION)"
+          fi
+          # Pre-release only for suffixed versions (e.g. -alpha.1) so plain
+          # CalVer versions become full releases and releases/latest resolves.
+          prerelease=
+          if [[ "$TAG" == *-* ]]; then prerelease=--prerelease; fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+              # Idempotent re-runs (e.g. after a tag move): drop the old
+              # assets so only correctly named ones remain, then upload.
+              for a in $(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
+                gh release delete-asset "$TAG" --repo "$GITHUB_REPOSITORY" "$a" --yes
+              done
+              gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" rclonex_* checksums.txt install.sh
+            elif [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" == "true" ]]; then
+              # Rolling prerelease: recreate it on the pushed commit so the
+              # tag always points at the build it was cut from. Full releases
+              # (plain CalVer, cut from a release branch) are left untouched.
+              gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $prerelease --title "$TAG" --notes "Automated prerelease from ${GITHUB_REF_NAME} @ $(git rev-parse --short HEAD)" rclonex_* checksums.txt install.sh
+            else
+              echo "$TAG is a full release - leaving it untouched"
+            fi
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes $prerelease --title "$TAG" --target "$GITHUB_SHA" rclonex_* checksums.txt install.sh
           fi

@@ -2,7 +2,7 @@
 # Github Actions release for rclone
 # -*- compile-command: "yamllint -f parsable build_publish_docker_plugin.yml" -*-
 
-name: Release Build for Docker Plugin
+name: Publish Docker Plugin
 
 on:
   release:

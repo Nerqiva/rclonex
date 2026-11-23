@@ -1,4 +1,4 @@
-name: Notify users based on issue labels
+name: Issue Label Notifications
 
 on:
   issues:

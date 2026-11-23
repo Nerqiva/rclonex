@@ -2,7 +2,7 @@
 # Github Actions release for rclone
 # -*- compile-command: "yamllint -f parsable build_publish_docker_image.yml" -*-
 
-name: Build & Push Docker Images
+name: Publish Docker Images
 
 # Trigger the workflow on push or pull request
 on:

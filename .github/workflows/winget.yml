@@ -1,4 +1,4 @@
-name: Publish to Winget
+name: Publish Release to Winget
 on:
   release:
     types: [released]
