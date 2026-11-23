@@ -161,3 +161,8 @@ jobs:
           else
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes $prerelease --title "$TAG" --target "$GITHUB_SHA" rclonex_* checksums.txt install.sh
           fi
+          # Publishing a prerelease from main also copies main into the
+          # prerelease version branch (e.g. release/v2026.11.0-alpha.5).
+          if [[ "$GITHUB_REF" == refs/heads/main && -n "$prerelease" ]]; then
+            git push --force origin "$GITHUB_SHA:refs/heads/release/$TAG"
+          fi
