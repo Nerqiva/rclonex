@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -263,6 +265,64 @@ func (r *shortErrorReader) Read(p []byte) (int, error) {
 }
 
 func (r *shortErrorReader) Close() error { return nil }
+
+// shortVolumeFs serves one named volume with fewer bytes than its object
+// reports, ending with a clean io.EOF. This models a remote which returns a
+// truncated response body for a ranged or streamed object.
+type shortVolumeFs struct {
+	fs.Fs
+	shortName string
+	drop      int
+}
+
+func (f *shortVolumeFs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
+	obj, err := f.Fs.NewObject(ctx, remote)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.Contains(remote, f.shortName) {
+		return obj, nil
+	}
+	return &shortVolumeObject{Object: obj, drop: f.drop}, nil
+}
+
+type shortVolumeObject struct {
+	fs.Object
+	drop int
+}
+
+func (o *shortVolumeObject) Open(ctx context.Context, options ...fs.OpenOption) (io.ReadCloser, error) {
+	rc, err := o.Object.Open(ctx, options...)
+	if err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		_ = rc.Close()
+		return nil, err
+	}
+	if err := rc.Close(); err != nil {
+		return nil, err
+	}
+	if len(data) <= o.drop {
+		return nil, fmt.Errorf("fixture too short to truncate")
+	}
+	return io.NopCloser(bytes.NewReader(data[:len(data)-o.drop])), nil
+}
+
+func TestExtractRarMultiVolumeShortVolume(t *testing.T) {
+	ctx := context.Background()
+	base := memoryFs(t, "src")
+	src := &shortVolumeFs{Fs: base, shortName: ".part2.", drop: 32}
+	dst := memoryFs(t, "dst")
+	uploadFixtureVolumes(t, ctx, base, "", "mv-multivolume.part1.rar", "mv-multivolume.part2.rar", "mv-multivolume.part3.rar")
+
+	err := ArchiveExtract(ctx, dst, "", src, "mv-multivolume.part1.rar")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mv-multivolume.part2.rar")
+	assert.Contains(t, err.Error(), "expected")
+}
 
 func TestConcatVolumesReaderPropagatesReadError(t *testing.T) {
 	ctx := context.Background()
