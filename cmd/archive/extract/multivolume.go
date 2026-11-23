@@ -44,6 +44,28 @@ func (r *eofNormalizeReader) Read(p []byte) (int, error) {
 
 func (r *eofNormalizeReader) Close() error { return r.rc.Close() }
 
+// volumeReadVerifier reports a volume whose remote response ends before the
+// size the object declared. rardecode treats a clean EOF as the end of the
+// volume set, so a truncated response otherwise surfaces as an unrelated
+// decoder error on whichever file happened to span the missing bytes.
+type volumeReadVerifier struct {
+	rc   io.ReadCloser
+	name string
+	size int64
+	read int64
+}
+
+func (v *volumeReadVerifier) Read(p []byte) (int, error) {
+	n, err := v.rc.Read(p)
+	v.read += int64(n)
+	if err == io.EOF && v.read < v.size {
+		return n, fmt.Errorf("volume %q: remote returned %d bytes, expected %d", v.name, v.read, v.size)
+	}
+	return n, err
+}
+
+func (v *volumeReadVerifier) Close() error { return v.rc.Close() }
+
 // remoteFS exposes an rclone fs.Fs as an io/fs.FS so rardecode can open
 // multi-volume archive volumes by name. Names arrive as
 // path.Dir(srcFile)+"/"+volume (e.g. "sub/dir/fixture.part2.rar" when the
@@ -79,10 +101,13 @@ func (r remoteFS) Open(name string) (iofs.File, error) {
 	// Normalize before accounting so the transfer observes the same reads
 	// rardecode consumes
 	rc = &eofNormalizeReader{rc: rc}
+	size := obj.Size()
+	if size >= 0 {
+		rc = &volumeReadVerifier{rc: rc, name: clean, size: size}
+	}
 	if r.acc != nil {
 		rc = r.acc.Account(r.ctx, rc)
 	}
-	size := obj.Size()
 	return &remoteFile{ctx: r.ctx, name: path.Base(clean), obj: obj, rc: rc, size: size}, nil
 }
 
