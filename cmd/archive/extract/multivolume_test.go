@@ -5,6 +5,7 @@ package extract
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"testing"
@@ -239,4 +240,45 @@ func TestExtractSevenZipMultiVolumeMissingVolume(t *testing.T) {
 
 	err := ArchiveExtract(ctx, dst, "", src, "mv-multivolume.7z.001")
 	assert.Error(t, err)
+}
+
+// shortErrorReader yields its data then fails with err on the next read.
+type shortErrorReader struct {
+	data []byte
+	err  error
+	sent bool
+}
+
+func (r *shortErrorReader) Read(p []byte) (int, error) {
+	if len(r.data) > 0 {
+		n := copy(p, r.data)
+		r.data = r.data[n:]
+		return n, nil
+	}
+	if r.sent {
+		return 0, io.EOF
+	}
+	r.sent = true
+	return 0, r.err
+}
+
+func (r *shortErrorReader) Close() error { return nil }
+
+func TestConcatVolumesReaderPropagatesReadError(t *testing.T) {
+	ctx := context.Background()
+	sentinel := errors.New("volume read failed")
+	const size = 8
+	fetch := func(ctx context.Context, off, want int64) (io.ReadCloser, error) {
+		return &shortErrorReader{data: []byte("ab"), err: sentinel}, nil
+	}
+	state := &concatState{
+		volumes: []sevenZipVolume{{size: size, base: 0}},
+		readers: []*windowedReader{newWindowedReaderFromFetch(ctx, size, 0, nil, fetch)},
+	}
+	r := &concatVolumesReader{state: state, pos: 0, end: size}
+
+	n, err := r.Read(make([]byte, size))
+
+	assert.Equal(t, 2, n)
+	assert.ErrorIs(t, err, sentinel)
 }
