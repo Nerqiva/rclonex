@@ -137,4 +137,9 @@ Uses golangci-lint v2 with config in `.golangci.yml`. Enabled linters: errcheck,
 
 ## rclonex fork notes
 
-This is the `rclonex` fork. Every release is cut from its own `release/<tag>` branch (e.g. `release/v2026.11.0-alpha.1`); `main` tracks upstream `master` plus rclonex changes and is never tagged directly. Tags pushed on `release/<tag>` branches are built and published by `.github/workflows/rclonex.yml`; tags with a suffix (e.g. `-alpha.1`) are GitHub pre-releases, plain CalVer tags are full releases.
+This is the `rclonex` fork. `main` tracks upstream `master` plus rclonex changes. Releases are published by `.github/workflows/rclonex.yml`:
+
+- Pushing `main` (or running the workflow manually) publishes the version in `VERSION` as a rolling prerelease. Each run recreates the release and its tag on the pushed commit and force-copies `main` to `release/<version>` (e.g. `release/v2026.11.0-alpha.5`), so the version branch mirrors `main`. Existing full releases are never touched by this path.
+- A tag pushed on a `release/<tag>` branch publishes that tag; re-runs only refresh its assets.
+
+Versions with a suffix (e.g. `-alpha.1`) are GitHub pre-releases, plain CalVer versions are full releases so `releases/latest` resolves to them. The workflow list in the Actions tab is named for readability (`RcloneX: Test, Build & Release` is the fork's own CI).
