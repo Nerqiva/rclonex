@@ -2,7 +2,7 @@
 # rclonex CI: tests, regression, cross-platform builds, releases.
 # Kept separate from the upstream "build" workflow so upstream rebases stay mechanical.
 
-name: RcloneX: Test, Build & Release
+name: "RcloneX: Test, Build & Release"
 
 on:
   push:
