@@ -284,13 +284,13 @@ func (r *concatVolumesReader) Read(p []byte) (int, error) {
 	}
 	n, err := wr.ReadAt(p, local)
 	r.pos += int64(n)
-	if n > 0 {
+	if err == nil && n > 0 {
 		return n, nil
 	}
 	if err == nil {
 		err = io.EOF
 	}
-	return 0, err
+	return n, err
 }
 
 // Close closes the reader; the per-volume readers hold no open handles.
