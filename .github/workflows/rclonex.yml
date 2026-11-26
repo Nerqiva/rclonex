@@ -37,6 +37,8 @@ jobs:
         run: go build -o rclonex .
       - name: gofmt check
         run: test -z "$(gofmt -l cmd fs lib vfs librclone)" || { gofmt -l cmd fs lib vfs librclone; exit 1; }
+      - name: Shell syntax check
+        run: bash -n bin/install-rclonex.sh bin/install-rclonex-termux.sh
       - name: Version reports rclonex Calver
         run: ./rclonex version
       - name: Unit tests (archive, fs, lib)
@@ -58,7 +60,7 @@ jobs:
         run: RCLONE_CONFIG=/notfound go test -timeout 15m -run 'Large' -v -count=1 ./cmd/archive/extract/
 
   build:
-    name: build (${{ matrix.goos }}/${{ matrix.goarch }})
+    name: build (${{ matrix.asset || matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -68,6 +70,7 @@ jobs:
           - { goos: linux, goarch: amd64 }
           - { goos: linux, goarch: '386' }
           - { goos: linux, goarch: arm64 }
+          - { goos: linux, goarch: arm64, asset: termux }
           - { goos: windows, goarch: amd64 }
           - { goos: windows, goarch: arm64 }
           - { goos: darwin, goarch: amd64 }
@@ -98,11 +101,11 @@ jobs:
             apt-get update -qq && apt-get install -y -qq zip >/dev/null
             zip "rclonex_${{ matrix.goos }}_${{ matrix.goarch }}.zip" rclonex.exe
           else
-            tar -czf "rclonex_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" rclonex
+            tar -czf "rclonex_${{ matrix.asset || matrix.goos }}_${{ matrix.goarch }}.tar.gz" rclonex
           fi
       - uses: actions/upload-artifact@v7
         with:
-          name: rclonex-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: rclonex-${{ matrix.asset || matrix.goos }}-${{ matrix.goarch }}
           path: stage/rclonex_*
 
   release:
