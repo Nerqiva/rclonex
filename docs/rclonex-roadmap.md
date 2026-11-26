@@ -18,6 +18,15 @@ archive extraction. This file tracks the work items. Tasks are tracked in this f
 | T8 | CI: full-suite regression on push, memory-bounded extraction test job, release workflow wiring (Calver tag → release branch → binaries + checksums) | pending | — |
 | T9 | First Calver alpha release `v2026.11.0-alpha.1` from `release/v2026.11.0-alpha.1` (release branch per version; the bootstrap pins the same string) | pending | — |
 | T10 | ISO9660 extraction (Rock Ridge/Joliet long names) via go-diskfs over the windowed range-read cache | done | this commit |
+| T11 | RAR4 recovery fallback via a pinned local go-unarr fork, enabled on native linux/amd64 and linux/arm64 releases (`CGO_ENABLED=1 -tags unarr`); built-in decoder stays primary | done | this commit |
+
+T11 adds a RAR4-only second decoder. The built-in rardecode decoder remains
+authoritative; unarr is tried only when it reports a classified decoder
+failure (for example `ErrBadFileChecksum`), never for remote I/O, destination
+I/O, permission, cancellation or infrastructure errors. The fallback reads
+ranged windows from the same remote object, streams entries through the
+existing `Rcat` output path, and removes files it uploaded if it fails too.
+Other release targets keep `CGO_ENABLED=0`, including Termux.
 
 ## Requirements coverage
 

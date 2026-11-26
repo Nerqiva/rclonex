@@ -42,6 +42,7 @@ require (
 	github.com/dropbox/dropbox-sdk-go-unofficial/v6 v6.6.2
 	github.com/gabriel-vasile/mimetype v1.4.15
 	github.com/gdamore/tcell/v3 v3.6.0
+	github.com/gen2brain/go-unarr v0.2.5
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-darwin/apfs v0.0.0-20211011131704-f84b94dbf348
 	github.com/go-git/go-billy/v5 v5.9.2
@@ -66,6 +67,7 @@ require (
 	github.com/moby/sys/mountinfo v0.7.2
 	github.com/muesli/reflow v0.3.0
 	github.com/ncw/swift/v2 v2.0.5
+	github.com/nwaples/rardecode/v2 v2.4.6
 	github.com/oracle/oci-go-sdk/v65 v65.127.0
 	github.com/patrickmn/go-cache v2.1.0+incompatible
 	github.com/peterh/liner v1.2.3
@@ -217,7 +219,6 @@ require (
 	github.com/minio/minlz v1.2.0 // indirect
 	github.com/minio/xxml v0.0.3 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/nwaples/rardecode/v2 v2.4.6 // indirect
 	github.com/oklog/ulid/v2 v2.1.2 // indirect
 	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/panjf2000/ants/v2 v2.12.1 // indirect
@@ -285,3 +286,5 @@ require (
 	golang.org/x/mobile v0.0.0-20261011034528-197770444867
 	golang.org/x/term v0.47.0
 )
+
+replace github.com/gen2brain/go-unarr => ./third_party/go-unarr

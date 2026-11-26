@@ -1,0 +1,8 @@
+/cmd/unarr/unarr
+/cmd/unarr/unarr.exe
+/unarr
+/unarr.exe
+/dist
+
+.DS_Store
+.*.sw*

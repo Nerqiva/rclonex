@@ -130,6 +130,14 @@ Multi-volume RAR and 7z archives (and encrypted multi-volume sets with
 remote in order, nothing is staged locally. Spanned/multi-disk ZIPs and
 multi-part TAR archives are not supported.
 
+RAR4 archives are decoded by the built-in decoder first. Builds made with
+CGO enabled and the |unarr| build tag retry a RAR4 archive with the bundled
+unarr decoder only when the built-in decoder reports a classified decoder
+failure, such as a bad checksum. The retry streams the same remote archive
+through ranged opens and removes the files it uploaded if it also fails.
+Remote I/O, destination I/O, permission and cancellation errors are never
+retried.
+
 Memory usage is mostly determined by how much of the archive's metadata
 and coding the libraries must hold in memory, not by the size of the
 files being extracted:
@@ -228,11 +236,14 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 	if err != nil {
 		return err
 	}
+	// RAR4 and RAR5 share one archives.Format, but only RAR4 can use the
+	// unarr fallback. Check the signature while the probing stream is open.
+	rar4 := isRAR4(in)
 
 	// handleEntry extracts one entry from the archive. It is shared by
 	// the archive-format extraction path and the ISO9660 path. open opens
 	// the entry for reading; it must not be nil for regular files.
-	handleEntry := func(nameInArchive string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error {
+	var handleEntry entryHandler = func(nameInArchive string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error {
 		remote, err := destPath(nameInArchive, dstDir)
 		if err != nil {
 			return err
@@ -382,7 +393,51 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 			return f.Open()
 		})
 	})
-	err = encryptionHint(err, opts.password)
+
+	// The built-in RAR decoder is authoritative. Only a classified decoder
+	// failure on a RAR4 archive is retried with unarr; I/O, permission and
+	// cancellation failures must never trigger a second extraction.
+	if rar4 && isRecoverableRAR4DecodeError(err) {
+		primaryErr := err
+		fs.Logf(nil, "RAR decoder failed (%v), trying unarr RAR4 fallback", err)
+		counted := filesExtracted
+		var uploaded []string
+		fallbackEntry := entryHandler(func(nameInArchive string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error {
+			remote, destErr := destPath(nameInArchive, dstDir)
+			existed := false
+			if destErr == nil {
+				_, getErr := dst.NewObject(ctx, remote)
+				existed = getErr == nil
+			}
+			err := handleEntry(nameInArchive, size, modTime, isDir, open)
+			if err == nil && !isDir && !ci.DryRun && !existed && destErr == nil {
+				uploaded = append(uploaded, remote)
+			}
+			return err
+		})
+		tr.Reset(ctx)
+		filesExtracted = counted
+		fallbackErr := extractRAR4WithUnarr(ctx, srcObj, opts.windowSize, tr, fallbackEntry)
+		if fallbackErr == nil {
+			fs.Logf(nil, "unarr RAR4 fallback succeeded")
+			err = nil
+		} else {
+			// Roll back files uploaded by the fallback attempt. Entries
+			// from the primary attempt are deliberately left alone.
+			for _, remote := range uploaded {
+				obj, getErr := dst.NewObject(ctx, remote)
+				if getErr == nil {
+					if removeErr := obj.Remove(ctx); removeErr != nil {
+						fs.Debugf(nil, "Failed to remove fallback file %q: %v", remote, removeErr)
+					}
+				}
+			}
+			err = errors.Join(primaryErr, fmt.Errorf("unarr RAR4 fallback failed: %w", fallbackErr))
+			err = encryptionHint(err, opts.password)
+		}
+	} else {
+		err = encryptionHint(err, opts.password)
+	}
 
 	fs.Infof(nil, "Total files extracted %d", filesExtracted)
 
