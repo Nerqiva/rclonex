@@ -44,13 +44,13 @@ won't re-download if not needed.
 
 ## Termux (Android) {#termux}
 
-On an aarch64 device, install into `$PREFIX/bin` without root:
+On an aarch64 device, the main install script installs into `$PREFIX/bin` without root:
 
 ```console
-curl -fsSL https://github.com/Nerqiva/rclonex/releases/latest/download/install-termux.sh | bash
+curl -fsSL https://github.com/Nerqiva/rclonex/releases/latest/download/install.sh | bash
 ```
 
-`install-termux.sh` is attached to every rclonex release. To install manually,
+`install.sh` is attached to every rclonex release. To install manually,
 download `rclonex_termux_arm64.tar.gz` from the
 [releases page](https://github.com/Nerqiva/rclonex/releases), extract it and
 copy the binary:

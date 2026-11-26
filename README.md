@@ -208,17 +208,14 @@ curl -fsSL https://raw.githubusercontent.com/Nerqiva/rclonex/main/bin/install-rc
 The script detects your OS/arch, downloads the latest archive (the latest pre-release when no
 stable release exists yet), verifies its checksum against `checksums.txt` and installs `rclonex`
 to `/usr/local/bin` — re-running it won't re-download an up-to-date binary. `install.sh` is also
-attached to every release. That script covers Linux and macOS; on Windows download the `.zip`
-from the [releases page](https://github.com/Nerqiva/rclonex/releases).
+attached to every release. The same script covers Linux, macOS and Termux (Android aarch64); on
+Windows download the `.zip` from the [releases page](https://github.com/Nerqiva/rclonex/releases).
 
-On Termux (Android aarch64), run without root:
+On Termux, that same script installs to `$PREFIX/bin` with no sudo:
 
 ```console
-curl -fsSL https://github.com/Nerqiva/rclonex/releases/latest/download/install-termux.sh | bash
+curl -fsSL https://github.com/Nerqiva/rclonex/releases/latest/download/install.sh | bash
 ```
-
-It installs to `$PREFIX/bin` from the `rclonex_termux_arm64` asset; `install-termux.sh` is attached
-to every release.
 
 Or build from source (Go 1.26+):
 
