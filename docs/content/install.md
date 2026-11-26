@@ -42,6 +42,25 @@ sudo -v ; curl https://rclone.org/install.sh | sudo bash -s beta
 Note that this script checks the version of rclone installed first and
 won't re-download if not needed.
 
+## Termux (Android) {#termux}
+
+On an aarch64 device, install into `$PREFIX/bin` without root:
+
+```console
+curl -fsSL https://github.com/Nerqiva/rclonex/releases/latest/download/install-termux.sh | bash
+```
+
+`install-termux.sh` is attached to every rclonex release. To install manually,
+download `rclonex_termux_arm64.tar.gz` from the
+[releases page](https://github.com/Nerqiva/rclonex/releases), extract it and
+copy the binary:
+
+```console
+tar -xzf rclonex_termux_arm64.tar.gz
+install -m 0755 rclonex "$PREFIX/bin/rclonex"
+rclonex config
+```
+
 ## Linux installation {#linux}
 
 ### Precompiled binary {#linux-precompiled}

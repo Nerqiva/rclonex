@@ -128,7 +128,9 @@ jobs:
           sha256sum rclonex_* > checksums.txt
           cat checksums.txt
       - name: Prepare install script
-        run: cp bin/install-rclonex.sh install.sh
+        run: |
+          cp bin/install-rclonex.sh install.sh
+          cp bin/install-rclonex-termux.sh install-termux.sh
       - name: Create or update release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -151,18 +153,18 @@ jobs:
               for a in $(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
                 gh release delete-asset "$TAG" --repo "$GITHUB_REPOSITORY" "$a" --yes
               done
-              gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" rclonex_* checksums.txt install.sh
+              gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" rclonex_* checksums.txt install.sh install-termux.sh
             elif [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" == "true" ]]; then
               # Rolling prerelease: recreate it on the pushed commit so the
               # tag always points at the build it was cut from. Full releases
               # (plain CalVer, cut from a release branch) are left untouched.
               gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
-              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $prerelease --title "$TAG" --notes "Automated prerelease from ${GITHUB_REF_NAME} @ $(git rev-parse --short HEAD)" rclonex_* checksums.txt install.sh
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $prerelease --title "$TAG" --notes "Automated prerelease from ${GITHUB_REF_NAME} @ $(git rev-parse --short HEAD)" rclonex_* checksums.txt install.sh install-termux.sh
             else
               echo "$TAG is a full release - leaving it untouched"
             fi
           else
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes $prerelease --title "$TAG" --target "$GITHUB_SHA" rclonex_* checksums.txt install.sh
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes $prerelease --title "$TAG" --target "$GITHUB_SHA" rclonex_* checksums.txt install.sh install-termux.sh
           fi
           # Publishing a prerelease from main also copies main into the
           # prerelease version branch (e.g. release/v2026.11.0-alpha.5).
