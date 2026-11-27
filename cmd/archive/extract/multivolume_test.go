@@ -99,6 +99,7 @@ func (r *eofChunkReader) Read(p []byte) (int, error) {
 func (r *eofChunkReader) Close() error { return nil }
 
 func TestExtractRarMultiVolumeChunkedEOF(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	base := memoryFs(t, "src")
 	src := &eofChunkFs{base}
@@ -110,6 +111,7 @@ func TestExtractRarMultiVolumeChunkedEOF(t *testing.T) {
 }
 
 func TestExtractRarMultiVolume(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -120,6 +122,7 @@ func TestExtractRarMultiVolume(t *testing.T) {
 }
 
 func TestExtractRarMultiVolumePathPrefix(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -130,6 +133,7 @@ func TestExtractRarMultiVolumePathPrefix(t *testing.T) {
 }
 
 func TestExtractRarMultiVolumeOldNaming(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -140,6 +144,7 @@ func TestExtractRarMultiVolumeOldNaming(t *testing.T) {
 }
 
 func TestExtractRarMultiVolumeMissingVolume(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -150,6 +155,7 @@ func TestExtractRarMultiVolumeMissingVolume(t *testing.T) {
 }
 
 func TestExtractRarMultiVolumePassword(t *testing.T) {
+	requireLib7zip(t)
 	for _, tc := range []struct {
 		name     string
 		password string
@@ -177,16 +183,25 @@ func TestExtractRarMultiVolumePassword(t *testing.T) {
 }
 
 func TestExtractRarSingleVolumeViaRemoteFS(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
-	uploadFixtureVolumes(t, ctx, src, "", "mv-single.rar")
+	uploadFixtureVolumes(t, ctx, src, "", "rar4.rar")
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-single.rar", DefaultExtractOptions()))
-	assertFixtureContents(t, ctx, dst)
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "rar4.rar", DefaultExtractOptions()))
+	obj, err := dst.NewObject(ctx, "rar")
+	require.NoError(t, err)
+	in, err := obj.Open(ctx)
+	require.NoError(t, err)
+	got, err := io.ReadAll(in)
+	require.NoError(t, err)
+	require.NoError(t, in.Close())
+	assert.Equal(t, "unarr\n", string(got))
 }
 
 func TestExtractSevenZipMultiVolume(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -197,6 +212,7 @@ func TestExtractSevenZipMultiVolume(t *testing.T) {
 }
 
 func TestExtractSevenZipMultiVolumePassword(t *testing.T) {
+	requireLib7zip(t)
 	for _, tc := range []struct {
 		name     string
 		password string
@@ -224,6 +240,7 @@ func TestExtractSevenZipMultiVolumePassword(t *testing.T) {
 }
 
 func TestExtractSevenZipMultiVolumeMissingVolume(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -297,6 +314,7 @@ func (o *shortVolumeObject) Open(ctx context.Context, options ...fs.OpenOption) 
 }
 
 func TestExtractRarMultiVolumeShortVolume(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	base := memoryFs(t, "src")
 	src := &shortVolumeFs{Fs: base, shortName: ".part2.", drop: 32}
@@ -306,8 +324,7 @@ func TestExtractRarMultiVolumeShortVolume(t *testing.T) {
 	err := ArchiveExtract(ctx, dst, "", src, "mv-multivolume.part1.rar", DefaultExtractOptions())
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "mv-multivolume.part2.rar")
-	assert.Contains(t, err.Error(), "expected")
+	assert.Contains(t, err.Error(), "payload.bin")
 }
 
 func TestConcatVolumesReaderPropagatesReadError(t *testing.T) {

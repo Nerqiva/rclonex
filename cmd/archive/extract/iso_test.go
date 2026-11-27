@@ -45,6 +45,7 @@ func makeISO(t *testing.T, entries []testArchiveEntry) []byte {
 }
 
 func TestArchiveExtractISO(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -58,6 +59,7 @@ func TestArchiveExtractISO(t *testing.T) {
 }
 
 func TestArchiveExtractISOWindowSizeZero(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -71,6 +73,7 @@ func TestArchiveExtractISOWindowSizeZero(t *testing.T) {
 }
 
 func TestArchiveExtractISOPasswordRejected(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -85,6 +88,7 @@ func TestArchiveExtractISOPasswordRejected(t *testing.T) {
 }
 
 func TestArchiveExtractISONotISO(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -96,10 +100,4 @@ func TestArchiveExtractISONotISO(t *testing.T) {
 
 	err = ArchiveExtract(ctx, dst, "", src, "not.iso", DefaultExtractOptions())
 	assert.Error(t, err)
-}
-
-func TestProbeISO(t *testing.T) {
-	iso := makeISO(t, testArchiveEntries())
-	assert.True(t, probeISO(bytes.NewReader(iso), int64(len(iso))))
-	assert.False(t, probeISO(bytes.NewReader(make([]byte, 1024)), 1024))
 }

@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bodgit/sevenzip"
-	"github.com/mholt/archives"
 	"github.com/rclone/rclone/cmd"
 	"github.com/rclone/rclone/cmd/archive"
 	"github.com/rclone/rclone/fs"
@@ -92,50 +90,25 @@ $ rclonex tree remote:extracted
 
 The source or destination or both can be local or remote. The source
 archive is streamed - it is not downloaded to the local machine first.
-Formats which need random access (ZIP, 7z and ISO9660 images) are read
-through a sliding window cache of ranged reads; formats which are single
-pass (tar, tar.gz ...) are read sequentially. Remotes which do not
-support range reads make ZIP, 7z and ISO9660 archives fail with an
-explicit error rather than silently extracting corrupted files.
+Nothing is mounted or staged on local disk. Remotes which do not support
+range reads fail with an explicit error rather than silently extracting
+corrupted files.
 
-RAR and 7z archives can be encrypted - use --archive-password to set
-the password. The password is not stored in the config file.
+All formats are decoded by the bundled 7-Zip engine. RAR and 7z archives
+can be encrypted - use --archive-password to set the password. The password
+is not stored in the config file.
 
 Multi-volume RAR and 7z archives (and encrypted multi-volume sets with
 a password) are supported: the volumes are streamed from the remote in order,
 nothing is staged locally. Spanned/multi-disk ZIPs and multi-part TAR archives
 are not supported.
 
-RAR4 archives are decoded by the built-in decoder first. Builds made with
-CGO enabled and the |unarr| build tag retry a RAR4 archive with the bundled
-unarr decoder only when the built-in decoder reports a classified decoder
-failure, such as a bad checksum. The retry streams the same remote archive
-through ranged opens and removes the files it uploaded if it also fails.
-Remote I/O, destination I/O, permission and cancellation errors are never
-retried.
-
-Memory usage is mostly determined by how much of the archive's metadata
-and coding the libraries must hold in memory, not by the size of the
-files being extracted:
-
-- ISO9660 images: directories are parsed once as they are walked
-  during extraction, so extraction time and memory usage do not depend
-  on how many files a single directory holds.
-- 7z archives: the whole archive header is parsed before any file is
-  extracted, so memory grows with the number of entries - roughly
-  140 MiB for 60000 tiny files. The LZMA/LZMA2 dictionary declared by
-  the archive is always allocated in full and there is no way to shrink
-  it - an archive built with a 128 MiB dictionary needs around that
-  much memory again.
-- ZIP archives: the central directory is loaded into memory, so memory
-  grows with the number of entries - roughly 220 MiB to extract an
-  archive holding 200000 files.
-- Single-pass formats (tar, tar.gz ...) stream and stay flat regardless
-  of the number of files.
-
---archive-window-size only limits the random-access read cache used for
-the archive's metadata blocks (16 MiB by default; 0 disables caching).
-It does not limit the dictionary or metadata memory described above.
+--archive-window-size sets the size of the ranged read cache used for remote
+objects (16 MiB by default; 0 reads one byte at a time). For nested archives
+such as tar.gz the engine re-reads the decompressed stream on backward seeks
+and buffers at most RCLONEX_ARCHIVE_BUFFER_SIZE bytes (64 MiB by default;
+minimum 1 MiB). Memory usage also grows with the number of archive entries
+and with the dictionary size declared by 7z archives.
 
 With --archive-skip-existing, entries whose destination object already
 exists with the same size are left untouched. This lets a retry continue
@@ -182,27 +155,6 @@ func withArchiveStream(ctx context.Context, srcObj fs.Object, tr *accounting.Tra
 		return err
 	}
 	return fn(in)
-}
-
-func promoteStaged(ctx context.Context, dst fs.Fs, stagingDir, dstDir string) error {
-	entries, err := dst.List(ctx, stagingDir)
-	if err != nil {
-		return fmt.Errorf("failed to list staged files: %w", err)
-	}
-	for _, obj := range entries {
-		remote := strings.TrimPrefix(obj.Remote(), stagingDir+"/")
-		if dstDir != "" {
-			remote = path.Join(dstDir, remote)
-		}
-		object, ok := obj.(fs.Object)
-		if !ok {
-			continue
-		}
-		if _, err := operations.Move(ctx, dst, nil, remote, object); err != nil {
-			return fmt.Errorf("failed to promote %q: %w", remote, err)
-		}
-	}
-	return operations.Purge(ctx, dst, stagingDir)
 }
 
 // ArchiveExtract extracts files from (src, srcFile) to (dst, dstDir) using opts.
@@ -276,122 +228,20 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 	handleEntry := newEntryHandler(dstDir)
 
 	err = withArchiveStream(ctx, srcObj, tr, options, func(in accounting.AccountReadAtSeeker) error {
-		if probeISO(in, srcObj.Size()) {
-			if opts.Password != "" {
-				return errPasswordUnsupported
-			}
-			fs.Debugf(nil, "Extract %s/%s, format iso to %s", src.Root(), srcFile, dst.Root())
-			tr.Reset(ctx)
-			source, err := newWindowedReader(ctx, srcObj, opts.WindowSize, tr, options...)
-			if err != nil {
-				return err
-			}
-			err = extractISO(ctx, source, srcObj.Size(), handleEntry)
-			fs.Infof(nil, "Total files extracted %d", filesExtracted)
-			return err
+		if opts.Password != "" && !lib7zipSupportsPassword(srcFile) {
+			return errPasswordUnsupported
 		}
-		if !forceLegacyExtractor && lib7zipHandles(srcFile) {
-			err := extractWithLib7zip(lib7zipArgs{
-				ctx:        ctx,
-				src:        src,
-				srcObj:     srcObj,
-				srcFile:    srcFile,
-				windowSize: opts.WindowSize,
-				tr:         tr,
-				password:   opts.Password,
-				options:    options,
-				handle:     handleEntry,
-			})
-			if !errors.Is(err, errLib7zipUnavailable) {
-				fs.Infof(nil, "Total files extracted %d", filesExtracted)
-				return err
-			}
-			fs.Debugf(nil, "7-Zip engine unavailable, using the previous extractor")
-		}
-		format, buffered, err := archives.Identify(ctx, "", in)
-		if err != nil {
-			format, buffered, err = archives.Identify(ctx, srcFile, buffered)
-		}
-		if err != nil {
-			return fmt.Errorf("failed to open check file type: %w", err)
-		}
-		fs.Debugf(nil, "Extract %s/%s, format %s to %s", src.Root(), srcFile, strings.TrimPrefix(format.Extension(), "."), dst.Root())
-		rar4 := isRAR4(in)
-
-		if r, ok := format.(archives.Rar); ok {
-			tr.Reset(ctx)
-			r.Name = srcFile
-			r.FS = remoteFS{ctx: ctx, f: src, acc: tr}
-			format = r
-		}
-		format, err = applyOptions(format, opts)
-		if err != nil {
-			return err
-		}
-		ex, isExtract := format.(archives.Extraction)
-		if !isExtract {
-			return fmt.Errorf("extraction for %s not supported", strings.TrimPrefix(format.Extension(), "."))
-		}
-
-		var source io.Reader = buffered
-		switch format.(type) {
-		case archives.Zip:
-			tr.Reset(ctx)
-			source, err = newWindowedReader(ctx, srcObj, opts.WindowSize, tr, options...)
-			if err != nil {
-				return err
-			}
-		case archives.SevenZip:
-			tr.Reset(ctx)
-			if strings.HasSuffix(strings.ToLower(srcFile), ".001") {
-				volumes, totalSize, err := collectSevenZipVolumes(ctx, src, srcFile)
-				if err != nil {
-					return fmt.Errorf("failed to collect the 7z volume set for %q: %w", srcFile, err)
-				}
-				volumesReader := newWindowedReaderFromFetch(ctx, totalSize, opts.WindowSize, concatFetch(ctx, volumes, tr, options...))
-				volumesReader.name = srcFile
-				source = volumesReader
-			} else {
-				source, err = newWindowedReader(ctx, srcObj, opts.WindowSize, tr, options...)
-				if err != nil {
-					return err
-				}
-			}
-		case archives.Rar:
-			source = nil
-		}
-
-		err = ex.Extract(ctx, source, func(ctx context.Context, f archives.FileInfo) error {
-			return handleEntry(f.NameInArchive, f.Size(), f.ModTime(), f.IsDir(), func() (io.ReadCloser, error) {
-				return f.Open()
-			})
+		err := extractWithLib7zip(lib7zipArgs{
+			ctx:        ctx,
+			src:        src,
+			srcObj:     srcObj,
+			srcFile:    srcFile,
+			windowSize: opts.WindowSize,
+			tr:         tr,
+			password:   opts.Password,
+			options:    options,
+			handle:     handleEntry,
 		})
-
-		if rar4 && isRecoverableRAR4DecodeError(err) {
-			primaryErr := err
-			fs.Logf(nil, "RAR decoder failed (%v), trying unarr RAR4 fallback", err)
-			stagingDir := path.Join(dstDir, fmt.Sprintf(".rclonex-rar4-fallback-%d", time.Now().UnixNano()))
-			tr.Reset(ctx)
-			// The primary attempt is discarded, so its counted errors must not
-			// survive into the command result when the fallback succeeds.
-			accounting.Stats(ctx).ResetErrors()
-			filesExtracted = 0
-			fallbackErr := extractRAR4WithUnarr(ctx, srcObj, opts.WindowSize, tr, newEntryHandler(stagingDir))
-			if fallbackErr == nil {
-				fallbackErr = promoteStaged(ctx, dst, stagingDir, dstDir)
-			}
-			if fallbackErr == nil {
-				fs.Logf(nil, "unarr RAR4 fallback succeeded")
-				err = nil
-			} else {
-				_ = operations.Purge(ctx, dst, stagingDir)
-				err = errors.Join(primaryErr, fmt.Errorf("unarr RAR4 fallback failed: %w", fallbackErr))
-				err = encryptionHint(err, opts.Password)
-			}
-		} else {
-			err = encryptionHint(err, opts.Password)
-		}
-
 		fs.Infof(nil, "Total files extracted %d", filesExtracted)
 		return err
 	})
@@ -435,79 +285,6 @@ func removePartial(ctx context.Context, remote string, obj fs.Object) {
 	}
 	if err := obj.Remove(ctx); err != nil && !errors.Is(err, fs.ErrorObjectNotFound) {
 		fs.Debugf(nil, "Failed to remove incomplete %q: %v", remote, err)
-	}
-}
-
-// encryptionHint rewrites an error which indicates the archive is encrypted
-// into a more helpful one. The extraction library reports a missing or wrong
-// password as a low-level decrypt error, so this supplies the hint that
-// --archive-password exists. It returns err unchanged otherwise.
-func encryptionHint(err error, password string) error {
-	var re *sevenzip.ReadError
-	if !errors.As(err, &re) || !re.Encrypted {
-		return err
-	}
-	if password == "" {
-		return fmt.Errorf("archive is encrypted - use --archive-password to supply the password: %w", err)
-	}
-	return fmt.Errorf("failed to decrypt archive - the password supplied with --archive-password is incorrect (or the archive is corrupt): %w", err)
-}
-
-// applyOptions applies the password option to the
-// identified format, returning the format to extract with.
-//
-// Formats wrapped in a CompressedArchive (e.g. tar.gz) get the option
-// applied to the inner archive. The password is only meaningful to RAR and
-// 7z archives, so an error is returned for other formats rather than
-// silently ignoring it.
-func applyOptions(format archives.Format, opts ExtractOptions) (archives.Format, error) {
-	if ca, ok := format.(archives.CompressedArchive); ok {
-		updated, err := applyExtractionOptions(ca.Extraction, opts)
-		if err != nil {
-			return nil, err
-		}
-		ca.Extraction = updated
-		return ca, nil
-	}
-	ex, ok := format.(archives.Extraction)
-	if !ok {
-		if opts.Password != "" {
-			return nil, errPasswordUnsupported
-		}
-		return format, nil
-	}
-	return applyExtractionOptions(ex, opts)
-}
-
-// applyExtractionOptions applies the password to a single extraction
-// format. The password is rejected for every format other than RAR and 7z.
-func applyExtractionOptions(ex archives.Extraction, opts ExtractOptions) (archives.Extraction, error) {
-	switch f := ex.(type) {
-	case archives.Zip:
-		if opts.Password != "" {
-			return nil, errPasswordUnsupported
-		}
-		return f, nil
-	case archives.SevenZip:
-		if opts.Password != "" {
-			f.Password = opts.Password
-		}
-		return f, nil
-	case archives.Rar:
-		if opts.Password != "" {
-			f.Password = opts.Password
-		}
-		return f, nil
-	case archives.Tar:
-		if opts.Password != "" {
-			return nil, errPasswordUnsupported
-		}
-		return f, nil
-	default:
-		if opts.Password != "" {
-			return nil, errPasswordUnsupported
-		}
-		return ex, nil
 	}
 }
 

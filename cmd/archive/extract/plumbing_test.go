@@ -18,6 +18,7 @@ import (
 )
 
 func TestArchiveExtractPrefixedZip(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "prefixed-src")
 	dst := memoryFs(t, "prefixed-dst")
@@ -157,6 +158,7 @@ func TestUploadEntryKeepsExistingObjectOnDecoderError(t *testing.T) {
 }
 
 func TestArchiveExtractIdentifiesByContentBeforeName(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "misnamed-src")
 	dst := memoryFs(t, "misnamed-dst")

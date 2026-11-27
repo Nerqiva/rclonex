@@ -65,6 +65,7 @@ func checkLargeExtraction(t *testing.T, dstDir, payloadName string, size int64, 
 }
 
 func TestArchiveExtractLargeTarGz(t *testing.T) {
+	requireLib7zip(t)
 	if testing.Short() {
 		t.Skip("skipping large file test in -short mode")
 	}
@@ -123,6 +124,7 @@ func TestArchiveExtractLargeTarGz(t *testing.T) {
 // fixture is tiny (the payload is highly compressible) yet still exercises
 // the full extraction path.
 func TestArchiveExtractLargeSevenZipMultiVolume(t *testing.T) {
+	requireLib7zip(t)
 	if testing.Short() {
 		t.Skip("skipping large file test in -short mode")
 	}
@@ -154,6 +156,7 @@ func TestArchiveExtractLargeSevenZipMultiVolume(t *testing.T) {
 }
 
 func TestArchiveExtractLargeZipRandomAccess(t *testing.T) {
+	requireLib7zip(t)
 	if testing.Short() {
 		t.Skip("skipping large file test in -short mode")
 	}

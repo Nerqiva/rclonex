@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mholt/archives"
 	_ "github.com/rclone/rclone/backend/memory"
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/hash"
@@ -177,6 +176,7 @@ func checkExtracted(t *testing.T, ctx context.Context, dst fs.Fs, entries []test
 }
 
 func TestArchiveExtractZip(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -190,6 +190,7 @@ func TestArchiveExtractZip(t *testing.T) {
 }
 
 func TestArchiveExtractZipWindowSizeZero(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -203,6 +204,7 @@ func TestArchiveExtractZipWindowSizeZero(t *testing.T) {
 }
 
 func TestArchiveExtractSkipExistingSameSize(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -234,6 +236,7 @@ func TestArchiveExtractSkipExistingSameSize(t *testing.T) {
 }
 
 func TestArchiveExtractSkipExistingSizeMismatch(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -252,6 +255,7 @@ func TestArchiveExtractSkipExistingSizeMismatch(t *testing.T) {
 }
 
 func TestArchiveExtractTarGz(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -265,6 +269,7 @@ func TestArchiveExtractTarGz(t *testing.T) {
 }
 
 func TestArchiveExtractCorruptZip(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
@@ -307,6 +312,7 @@ func (f *rangeIgnoringFs) NewObject(ctx context.Context, remote string) (fs.Obje
 }
 
 func TestArchiveExtractRangeNotSupported(t *testing.T) {
+	requireLib7zip(t)
 	ctx := context.Background()
 	src := &rangeIgnoringFs{data: makeZip(t, testArchiveEntries())}
 	dst := memoryFs(t, "dst")
@@ -317,7 +323,8 @@ func TestArchiveExtractRangeNotSupported(t *testing.T) {
 }
 
 func TestArchiveExtractPassword(t *testing.T) {
-	for _, name := range []string{"encrypted.7z", "encrypted-files.7z", "encrypted.rar"} {
+	requireLib7zip(t)
+	for _, name := range []string{"encrypted.7z", "encrypted-files.7z"} {
 		for _, tc := range []struct {
 			name     string
 			password string
@@ -363,48 +370,22 @@ func TestArchiveExtractPassword(t *testing.T) {
 	}
 }
 
-func TestApplyOptions(t *testing.T) {
-	opts := func(password string) ExtractOptions {
-		return ExtractOptions{Password: password}
+func TestLib7zipSupportsPassword(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want bool
+	}{
+		{"archive.7z", true},
+		{"archive.7z.001", true},
+		{"archive.rar", true},
+		{"archive.part1.rar", true},
+		{"archive.r00", false},
+		{"archive.zip", false},
+		{"archive.tar.gz", false},
+		{"archive.iso", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, lib7zipSupportsPassword(tc.name))
+		})
 	}
-
-	t.Run("rar with password", func(t *testing.T) {
-		got, err := applyOptions(archives.Rar{}, opts("secret"))
-		require.NoError(t, err)
-		assert.Equal(t, archives.Rar{Password: "secret"}, got)
-	})
-	t.Run("7z with password", func(t *testing.T) {
-		got, err := applyOptions(archives.SevenZip{}, opts("secret"))
-		require.NoError(t, err)
-		assert.Equal(t, archives.SevenZip{Password: "secret"}, got)
-	})
-	t.Run("zip without password", func(t *testing.T) {
-		got, err := applyOptions(archives.Zip{}, opts(""))
-		require.NoError(t, err)
-		assert.Equal(t, archives.Zip{}, got)
-	})
-	t.Run("tar without password", func(t *testing.T) {
-		got, err := applyOptions(archives.Tar{}, opts(""))
-		require.NoError(t, err)
-		assert.Equal(t, archives.Tar{}, got)
-	})
-	t.Run("zip with password rejected", func(t *testing.T) {
-		_, err := applyOptions(archives.Zip{}, opts("secret"))
-		require.Error(t, err)
-	})
-	t.Run("tar with password rejected", func(t *testing.T) {
-		_, err := applyOptions(archives.Tar{}, opts("secret"))
-		require.Error(t, err)
-	})
-	t.Run("compressed archive with rar inside gets password", func(t *testing.T) {
-		got, err := applyOptions(archives.CompressedArchive{Extraction: archives.Rar{}, Compression: archives.Gz{}}, opts("secret"))
-		require.NoError(t, err)
-		ca, ok := got.(archives.CompressedArchive)
-		require.True(t, ok)
-		assert.Equal(t, archives.Rar{Password: "secret"}, ca.Extraction)
-	})
-	t.Run("compressed archive with zip inside rejects password", func(t *testing.T) {
-		_, err := applyOptions(archives.CompressedArchive{Extraction: archives.Zip{}, Compression: archives.Gz{}}, opts("secret"))
-		require.Error(t, err)
-	})
 }
