@@ -67,6 +67,8 @@ jobs:
 
   sidecars:
     uses: ./.github/workflows/lib7zip-sidecars.yml
+    permissions:
+      contents: write
 
   test:
     name: test
