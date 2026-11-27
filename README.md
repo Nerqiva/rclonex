@@ -207,8 +207,8 @@ The last published release, `v2026.11.27.2-alpha`, is the final one built with t
 curl -fsSL https://raw.githubusercontent.com/Nerqiva/rclonex/main/bin/install-rclonex.sh | sudo bash
 ```
 
-The script detects your OS/arch, downloads the latest archive (the latest pre-release when no
-stable release exists yet), verifies its checksum against `checksums.txt` and installs `rclonex`
+The script detects your OS/arch, downloads the newest pre-release archive, verifies its checksum
+against `checksums.txt` and installs `rclonex`
 to `/usr/local/bin` — re-running it won't re-download an up-to-date binary. `install.sh` is also
 attached to every release. The same script covers Linux, macOS and Termux (Android aarch64); on
 Windows download the `.zip` from the [releases page](https://github.com/Nerqiva/rclonex/releases).
@@ -231,7 +231,7 @@ rclonex version
 
 **Note:** `go install github.com/rclone/rclone@latest` installs *upstream* rclone, not rclonex — the Go module path is deliberately unchanged so upstream rebases stay easy. Build from the rclonex clone as shown above, or download a release binary.
 
-Releases are cut from `release/<tag>` branches by the `rclonex` GitHub Actions workflow. Tags use CalVer with an `-alpha.N` suffix, and every release is published as a full release so GitHub marks the newest one as Latest. Upstream rclone releases (rclone.org) do not include rclonex.
+Releases are cut from `release/<tag>` branches by the `rclonex` GitHub Actions workflow. Tags with a suffix (e.g. `-alpha.N`) are published as pre-releases. The install script always picks the newest rclonex pre-release, including when a full release exists. Upstream rclone releases (rclone.org) do not include rclonex.
 
 ## What rclonex changes: `archive extract`
 

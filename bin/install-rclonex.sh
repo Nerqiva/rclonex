@@ -35,10 +35,6 @@ if [ -n "$1" ] && [ "$1" != "beta" ]; then
     usage
 fi
 
-if [ -n "$1" ]; then
-    install_beta="beta "
-fi
-
 export XDG_CONFIG_HOME=config
 
 tmp_dir=$(mktemp -d 2>/dev/null || mktemp -d -t 'rclonex-install.XXXXXXXXXX')
@@ -71,24 +67,12 @@ fi
 if [ -n "${RCLONEX_RELEASE_TAG:-}" ]; then
     target_tag=$RCLONEX_RELEASE_TAG
 else
-    if [ -n "$install_beta" ]; then
-        releases_api="https://api.github.com/repos/${REPO}/releases?per_page=1"
-        releases_json=$(curl -fsSL "$releases_api" 2>errors) || {
-            echo "Failed to query $releases_api"
-            exit 1
-        }
-    else
-        releases_json=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>errors) || {
-            echo 'No stable release exists yet - installing the latest pre-release instead.'
-            install_beta="beta "
-            releases_api="https://api.github.com/repos/${REPO}/releases?per_page=1"
-            releases_json=$(curl -fsSL "$releases_api" 2>errors) || {
-                echo "Failed to query $releases_api"
-                exit 1
-            }
-        }
-    fi
-    target_tag=$(printf '%s' "$releases_json" | grep -o '"tag_name":[^,]*' | cut -d'"' -f4 | grep -m1 '^v')
+    releases_api="https://api.github.com/repos/${REPO}/releases?per_page=100"
+    releases_json=$(curl -fsSL "$releases_api" 2>errors) || {
+        echo "Failed to query $releases_api"
+        exit 1
+    }
+    target_tag=$(printf '%s' "$releases_json" | grep -o '"tag_name":[^,]*' | cut -d'"' -f4 | grep -m1 '^v.*-')
 fi
 if [ -z "$target_tag" ]; then
     echo 'Failed to parse the release tag from the GitHub API response.'
@@ -97,7 +81,7 @@ fi
 
 installed_version=$(rclonex version 2>/dev/null | head -n 1 | awk '{print $NF}')
 if [ "$installed_version" = "$target_tag" ]; then
-    printf "\nThe latest %sversion of rclonex %s is already installed.\n\n" "$install_beta" "$installed_version"
+    printf "\nThe latest prerelease version of rclonex %s is already installed.\n\n" "$installed_version"
     exit 3
 fi
 
