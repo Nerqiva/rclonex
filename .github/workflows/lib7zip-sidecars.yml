@@ -10,7 +10,6 @@ on:
   push:
     branches:
       - main
-      - experimental/lib7zip-engine
     paths:
       - .github/workflows/lib7zip-sidecars.yml
       - third_party/sevenzip-go/PREBUILT

@@ -45,7 +45,7 @@ tmp_dir=$(mktemp -d 2>/dev/null || mktemp -d -t 'rclonex-install.XXXXXXXXXX')
 trap 'cd / && rm -rf "$tmp_dir"' EXIT
 cd "$tmp_dir"
 
-for tool in curl tar grep cut awk head; do
+for tool in curl tar grep cut awk head cp; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         printf "\nRequired tool '%s' not found. Please install it and try again.\n\n" "$tool"
         exit 4
@@ -192,6 +192,12 @@ if [ -f libc7zip.so ] && [ -f 7z.so ]; then
             exit 1
         fi
     done
+    if [ -d Codecs ]; then
+        if ! cp -R Codecs "$lib_dir/"; then
+            printf '\nFailed to install Codecs beside %s - run this script with sudo.\n\n' "$install_dest"
+            exit 1
+        fi
+    fi
 fi
 
 version=$(rclonex version 2>/dev/null | head -n 1) || true
