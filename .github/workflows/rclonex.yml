@@ -96,6 +96,34 @@ jobs:
       - name: Regression tests (short, all packages)
         run: go test -short -timeout 20m ./...
 
+  lib7zip:
+    name: test (lib7zip engine)
+    needs: version
+    if: needs.version.outputs.skip_run != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.version.outputs.sha || github.sha }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.11'
+          cache: true
+      - name: Build matched lib7zip sidecars
+        run: third_party/sevenzip-go/build-libs.sh "$RUNNER_TEMP/lib7zip-build" "$RUNNER_TEMP/lib7zip"
+      - name: Compile extract tests beside the sidecars
+        run: |
+          go test -c -o "$RUNNER_TEMP/lib7zip/extract.test" ./cmd/archive/extract
+          ln -s "$GITHUB_WORKSPACE/cmd/archive/extract/testdata" "$RUNNER_TEMP/lib7zip/testdata"
+      - name: Exercise the lib7zip engine
+        env:
+          RCLONE_7ZIP_LIB: ${{ runner.temp }}/lib7zip/libc7zip.so
+          RCLONE_CONFIG: /notfound
+        run: |
+          cd "$RUNNER_TEMP/lib7zip"
+          ./extract.test -test.v -test.run 'TestLib7zipParity|TestArchiveExtractPassword|TestExtractSevenZipMultiVolume|TestArchiveExtractLargeSevenZipMultiVolume'
+
   large-file:
     name: large-file (resource)
     needs: version
@@ -123,7 +151,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { goos: linux, goarch: amd64, cgo: '1', gotags: unarr }
+          - { goos: linux, goarch: amd64, cgo: '1', gotags: unarr, lib7zip: true }
           - { goos: linux, goarch: '386' }
           - { goos: linux, goarch: arm64, cgo: '1', gotags: unarr, cc: aarch64-linux-gnu-gcc }
           - { goos: linux, goarch: arm64, asset: termux }
@@ -156,12 +184,21 @@ jobs:
           else
             go build -trimpath ${GOTAGS:+-tags "$GOTAGS"} -o stage/rclonex -ldflags "-s -X github.com/rclone/rclone/fs.Version=$(cat VERSION)" .
           fi
+      - name: Build lib7zip sidecars
+        if: matrix.lib7zip
+        run: |
+          third_party/sevenzip-go/build-libs.sh "$RUNNER_TEMP/lib7zip-build" "$RUNNER_TEMP/lib7zip"
+          cp "$RUNNER_TEMP/lib7zip/libc7zip.so" "$RUNNER_TEMP/lib7zip/7z.so" stage/
+          cp third_party/sevenzip-go/NOTICE.md stage/
+          cp -r third_party/sevenzip-go/licenses stage/
       - name: Package
         run: |
           cd stage
           if [ "${{ matrix.goos }}" = windows ]; then
             apt-get update -qq && apt-get install -y -qq zip >/dev/null
             zip "rclonex_${{ matrix.goos }}_${{ matrix.goarch }}.zip" rclonex.exe
+          elif [ "${{ matrix.lib7zip }}" = "true" ]; then
+            tar -czf "rclonex_${{ matrix.asset || matrix.goos }}_${{ matrix.goarch }}.tar.gz" rclonex libc7zip.so 7z.so NOTICE.md licenses
           else
             tar -czf "rclonex_${{ matrix.asset || matrix.goos }}_${{ matrix.goarch }}.tar.gz" rclonex
           fi
@@ -173,7 +210,7 @@ jobs:
   release:
     name: release
     if: needs.version.outputs.skip_run != 'true' && (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch')
-    needs: [version, test, build]
+    needs: [version, test, lib7zip, build]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

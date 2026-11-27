@@ -184,6 +184,16 @@ if ! install -m 0755 rclonex "$install_dest"; then
     exit 1
 fi
 
+if [ -f libc7zip.so ] && [ -f 7z.so ]; then
+    lib_dir=$(dirname "$install_dest")
+    for lib in libc7zip.so 7z.so; do
+        if ! install -m 0755 "$lib" "$lib_dir/$lib"; then
+            printf '\nFailed to install %s beside %s - run this script with sudo.\n\n' "$lib" "$install_dest"
+            exit 1
+        fi
+    done
+fi
+
 version=$(rclonex version 2>/dev/null | head -n 1) || true
 
 printf "\n%s has successfully installed.\n" "${version:-rclonex $target_tag}"
