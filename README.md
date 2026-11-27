@@ -231,7 +231,7 @@ rclonex version
 
 **Note:** `go install github.com/rclone/rclone@latest` installs *upstream* rclone, not rclonex — the Go module path is deliberately unchanged so upstream rebases stay easy. Build from the rclonex clone as shown above, or download a release binary.
 
-Releases are cut from `release/<tag>` branches by the `rclonex` GitHub Actions workflow. Tags with a suffix (e.g. `-alpha.N`) are published as pre-releases; plain CalVer tags are full releases and back `releases/latest`. Upstream rclone releases (rclone.org) do not include rclonex.
+Releases are cut from `release/<tag>` branches by the `rclonex` GitHub Actions workflow. Tags use CalVer with an `-alpha.N` suffix, and every release is published as a full release so GitHub marks the newest one as Latest. Upstream rclone releases (rclone.org) do not include rclonex.
 
 ## What rclonex changes: `archive extract`
 

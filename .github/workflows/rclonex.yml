@@ -259,8 +259,8 @@ jobs:
           else
             TAG="$(cat VERSION)"
           fi
-          prerelease=
-          if [[ "$TAG" == *-* ]]; then prerelease=--prerelease; fi
+          is_alpha=
+          if [[ "$TAG" == *-* ]]; then is_alpha=1; fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             if [[ "$GITHUB_REF" == refs/tags/* ]]; then
               for a in $(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
@@ -269,14 +269,14 @@ jobs:
               gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" rclonex_* checksums.txt install.sh
             elif [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" == "true" ]]; then
               gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
-              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$TARGET_SHA" $prerelease --title "$TAG" --notes "Automated prerelease from ${GITHUB_REF_NAME} @ $(git rev-parse --short HEAD)" rclonex_* checksums.txt install.sh
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$TARGET_SHA" --title "$TAG" --notes "Automated release from ${GITHUB_REF_NAME} @ $(git rev-parse --short HEAD)" rclonex_* checksums.txt install.sh
             else
               echo "$TAG is a full release - leaving it untouched"
             fi
           else
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes $prerelease --title "$TAG" --target "$TARGET_SHA" rclonex_* checksums.txt install.sh
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes --title "$TAG" --target "$TARGET_SHA" rclonex_* checksums.txt install.sh
           fi
-          if [[ "$GITHUB_REF" == refs/heads/main && -n "$prerelease" ]]; then
+          if [[ "$GITHUB_REF" == refs/heads/main && -n "$is_alpha" ]]; then
             git push --force origin "$TARGET_SHA:refs/heads/release/$TAG"
           fi
       - name: Move latest tag

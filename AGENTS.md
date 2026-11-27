@@ -145,4 +145,4 @@ This is the `rclonex` fork. `main` tracks upstream `master` plus rclonex changes
 - The build and release jobs publish the bumped commit as an alpha prerelease, recreate its tag, and force-copy `main` to `release/<version>` (e.g. `release/v2026.11.27.1-alpha`), so the version branch mirrors `main`. Existing full releases are never touched by this path.
 - A tag pushed on a `release/<tag>` branch publishes that tag; re-runs only refresh its assets.
 
-Agents never bump `VERSION` or `fs/versiontag.go` by hand. Versions with a suffix (e.g. `-alpha`) are GitHub pre-releases, plain CalVer versions are full releases so `releases/latest` resolves to them. The workflow list in the Actions tab is named for readability (`RcloneX: Test, Build & Release` is the fork's own CI).
+Agents never bump `VERSION` or `fs/versiontag.go` by hand. Versions use CalVer with an `-alpha.N` suffix and are published as full releases so GitHub marks the newest one as Latest and `releases/latest` resolves to it. The workflow list in the Actions tab is named for readability (`RcloneX: Test, Build & Release` is the fork's own CI).
