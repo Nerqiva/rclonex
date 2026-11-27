@@ -188,6 +188,8 @@ remote-to-remote archive extraction (ZIP, TAR, TAR.GZ, RAR, RAR5, 7z, ISO9660, i
 multi-volume archives where technically possible). Extraction streams directly from the
 source remote to the destination remote — complete archives are never downloaded locally.
 
+The last published release, `v2026.11.27.2-alpha`, is the final one built with the old extractor. Releases from this branch use the p7zip 7-Zip engine for `archive extract`.
+
 - **Module path:** `github.com/rclone/rclone` (kept so upstream rebases stay a fast-forward merge).
 - **Binary name:** `rclonex` (built with `go build -o rclonex` / `make`).
 - **Versioning:** Calver, `vYYYY.MM.MICRO-alpha.N` (see `VERSION`). Each release is cut from a
