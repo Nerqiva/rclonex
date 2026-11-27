@@ -5,6 +5,10 @@ source_dir=${1:-${TMPDIR:-/tmp}/lib7zip-build}
 output_dir=${2:-$(pwd)/lib7zip}
 tag=v1.8.0
 cxx=${LIB7ZIP_CXX:-g++}
+case "$cxx" in
+	*clang++) cc=${LIB7ZIP_CC:-${cxx%++}} ;;
+	*) cc=${LIB7ZIP_CC:-${cxx/++/cc}} ;;
+esac
 prebuilt_7z=${LIB7ZIP_7Z_SO:-}
 codec_dir=${LIB7ZIP_CODECS_DIR:-}
 
@@ -128,7 +132,7 @@ if [ -n "$prebuilt_7z" ]; then
 else
 	# libc7zip's CMake downloads p7zip 16.02 during configuration.
 	engine_dir="$source_dir/build/upstream-7zip-src"
-	make -C "$engine_dir" common7z CXX="$cxx -std=c++11"
+	make -C "$engine_dir" common7z CC="$cc" CXX="$cxx -std=c++11"
 	cp "$engine_dir/bin/7z.so" "$output_dir/"
 fi
 
