@@ -111,7 +111,8 @@ if old in cb:
 callback.write_text(cb)
 PY
 
-CXX="$cxx" cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -S "$source_dir" -B "$source_dir/build" ${LIB7ZIP_CMAKE_ARGS:-}
+export CMAKE_POLICY_VERSION_MINIMUM=3.5
+CXX="$cxx" cmake -S "$source_dir" -B "$source_dir/build" ${LIB7ZIP_CMAKE_ARGS:-}
 cmake --build "$source_dir/build" --parallel
 
 mkdir -p "$output_dir"
