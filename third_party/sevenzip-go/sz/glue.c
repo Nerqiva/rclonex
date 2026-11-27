@@ -32,7 +32,11 @@ MY_LIBHANDLE dynlib;
 int libc7zip_initialize(char *lib_path) {
   dynlib = MY_DLOPEN(lib_path);
   if (!dynlib) {
+#ifdef __WIN32
     fprintf(stderr, "Could not load %s\n", lib_path);
+#else
+    fprintf(stderr, "Could not load %s: %s\n", lib_path, dlerror());
+#endif
     fflush(stderr);
     return 1;
   }
