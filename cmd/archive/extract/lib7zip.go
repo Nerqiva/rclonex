@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -14,6 +15,12 @@ import (
 	"github.com/itchio/sevenzip-go/sz"
 	"github.com/rclone/rclone/fs"
 )
+
+func init() {
+	if path := os.Getenv("RCLONE_7ZIP_LIB"); path != "" {
+		sz.LibraryPath = path
+	}
+}
 
 // lib7zipReader adapts the ranged remote reader to the stream interface the
 // 7-Zip binding requires. The remote reader owns its own resources.
@@ -150,7 +157,11 @@ func extractWithLib7zip(args lib7zipArgs) error {
 		size, _ := item.GetUInt64Property(sz.PidSize)
 		mtime, ok := item.GetFileTimeProperty(sz.PidMTime)
 		if !ok {
-			mtime = time.Time{}
+			if ticks, found := item.GetUInt64Property(sz.PidMTime); found && ticks > 0 {
+				mtime = time.Unix(int64(ticks)/10000000-11644473600, int64(ticks)%10000000)
+			} else {
+				mtime = time.Time{}
+			}
 		}
 		if isDir {
 			err := args.handle(name, 0, mtime, true, func() (io.ReadCloser, error) {

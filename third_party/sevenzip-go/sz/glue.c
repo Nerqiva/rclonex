@@ -71,7 +71,7 @@ int libc7zip_initialize(char *lib_path) {
   LOADSYM(string_free)
   LOADSYM(item_get_uint64_property)
   LOADSYM(item_get_bool_property)
-  LOADSYM(item_get_filetime_property)
+  item_get_filetime_property_ = (void*) MY_DLSYM(dynlib, "item_get_filetime_property");
   LOADSYM(item_free)
 
   LOADSYM(archive_extract_item)
@@ -187,6 +187,10 @@ int32_t libc7zip_item_get_bool_property(item *i, int32_t property_index, int32_t
 }
 
 uint64_t libc7zip_item_get_filetime_property(item *i, int32_t property_index, int32_t *success) {
+  if (item_get_filetime_property_ == NULL) {
+    *success = 0;
+    return 0;
+  }
   return item_get_filetime_property_(i, property_index, success);
 }
 
