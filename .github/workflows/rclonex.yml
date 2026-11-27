@@ -279,3 +279,5 @@ jobs:
           if [[ "$GITHUB_REF" == refs/heads/main && -n "$prerelease" ]]; then
             git push --force origin "$TARGET_SHA:refs/heads/release/$TAG"
           fi
+      - name: Move latest tag
+        run: git push --force origin "${{ needs.version.outputs.sha || github.sha }}:refs/tags/latest"
