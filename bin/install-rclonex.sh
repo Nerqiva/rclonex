@@ -88,7 +88,7 @@ else
             }
         }
     fi
-    target_tag=$(printf '%s' "$releases_json" | grep -m1 -o '"tag_name":[^,]*' | cut -d'"' -f4)
+    target_tag=$(printf '%s' "$releases_json" | grep -o '"tag_name":[^,]*' | cut -d'"' -f4 | grep -m1 '^v')
 fi
 if [ -z "$target_tag" ]; then
     echo 'Failed to parse the release tag from the GitHub API response.'

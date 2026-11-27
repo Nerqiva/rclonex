@@ -138,6 +138,6 @@ jobs:
           . third_party/sevenzip-go/PREBUILT
           tag="lib7zip-sidecars-$PREBUILT_VERSION"
           gh release view "$tag" >/dev/null 2>&1 || \
-            gh release create "$tag" --title "lib7zip sidecars" \
+            gh release create "$tag" --title "lib7zip sidecars" --prerelease \
               --notes "Reusable lib7zip sidecars for upstream $PREBUILT_VERSION."
           gh release upload "$tag" "$RUNNER_TEMP"/sidecars/*.tar.gz --clobber
