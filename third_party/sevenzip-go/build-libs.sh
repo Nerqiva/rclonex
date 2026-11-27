@@ -39,13 +39,56 @@ implementation = """MYEXPORT uint64_t item_get_filetime_property(item *i, int32_
 
 """
 
+# 7-Zip reads a RAR5 extraction password from the archive or item, not from the
+# password passed to OpenArchiveEx. Export the overload that sets the item password.
+password_declaration = "MYEXPORT int archive_extract_item_with_password(archive *a, item *i, out_stream *os, const char *password);"
+password_header_anchor = "MYEXPORT int archive_extract_item(archive *a, item *i, out_stream *os);"
+password_source_anchor = "MYEXPORT int archive_extract_item(archive *a, item *i, out_stream *os) {"
+password_implementation = """MYEXPORT int archive_extract_item_with_password(archive *a, item *i, out_stream *os, const char *password) {
+\treturn a->arch->Extract((unsigned int)i->itm->GetArchiveIndex(), os->strm, FromCString((char *)password));
+}
+
+"""
+
 h = header.read_text()
 if "item_get_filetime_property" not in h:
     header.write_text(h.replace(header_anchor, declaration + "\n" + header_anchor, 1))
+if "archive_extract_item_with_password" not in h:
+    header.write_text(h.replace(password_header_anchor, password_declaration + "\n" + password_header_anchor, 1))
+
+null_anchor = """\t\tin_stream *is = m_def.open_current_volume_stream_cb(m_def.id);
+\t\treturn is->strm;"""
+null_fixed = """\t\tin_stream *is = m_def.open_current_volume_stream_cb(m_def.id);
+\t\tif (is == NULL || is->strm == NULL) {
+\t\t\treturn NULL;
+\t\t}
+\t\treturn is->strm;"""
 
 c = source.read_text()
 if "MYEXPORT uint64_t item_get_filetime_property" not in c:
     source.write_text(c.replace(source_anchor, implementation + source_anchor, 1))
+if "archive_extract_item_with_password" not in c:
+    source.write_text(c.replace(password_source_anchor, password_implementation + password_source_anchor, 1))
+if null_anchor in c:
+    source.write_text(c.replace(null_anchor, null_fixed, 1))
+
+# A failed volume callback must report a failing HRESULT. Returning false
+# reports S_OK and dereferences a null archive in C7ZipLibrary.
+volumes = root / "vendor/lib7zip/Lib7Zip/7ZipOpenArchive.cpp"
+v = volumes.read_text()
+for anchor in ("if (!pMultiVolumes->MoveToVolume(firstVolumeName))", "if (pInStream == NULL)"):
+    old = anchor + "\n\t\treturn false;"
+    if old in v:
+        v = v.replace(old, anchor + "\n\t\treturn E_FAIL;", 1)
+volumes.write_text(v)
+
+callback = root / "vendor/lib7zip/Lib7Zip/7ZipArchiveOpenCallback.cpp"
+cb = callback.read_text()
+anchor = "\t\tpInStream = m_pMultiVolumes->OpenCurrentVolumeStream();"
+old = anchor + "\n\t} else {\n\t\treturn S_FALSE;\n\t}\n\n    C7ZipInStreamWrapper * pArchiveStream = new C7ZipInStreamWrapper(pInStream);"
+if old in cb:
+    cb = cb.replace(old, anchor + "\n\t} else {\n\t\treturn S_FALSE;\n\t}\n\tif (pInStream == NULL)\n\t\treturn S_FALSE;\n\n    C7ZipInStreamWrapper * pArchiveStream = new C7ZipInStreamWrapper(pInStream);", 1)
+callback.write_text(cb)
 PY
 
 cmake -S "$source_dir" -B "$source_dir/build"

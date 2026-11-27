@@ -161,6 +161,11 @@ typedef int (*archive_extract_item_t)(archive *a, item *i, out_stream *os);
 DECLARE(archive_extract_item)
 int libc7zip_archive_extract_item(archive *a, item *i, out_stream *os);
 
+// archive_extract_item_with_password
+typedef int (*archive_extract_item_with_password_t)(archive *a, item *i, out_stream *os, const char *password);
+DECLARE(archive_extract_item_with_password)
+int libc7zip_archive_extract_item_with_password(archive *a, item *i, out_stream *os, const char *password);
+
 // extract_callback_new
 typedef extract_callback *(*extract_callback_new_t)();
 DECLARE(extract_callback_new)

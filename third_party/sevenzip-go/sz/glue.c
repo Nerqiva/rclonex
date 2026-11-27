@@ -75,6 +75,7 @@ int libc7zip_initialize(char *lib_path) {
   LOADSYM(item_free)
 
   LOADSYM(archive_extract_item)
+  archive_extract_item_with_password_ = (void*) MY_DLSYM(dynlib, "archive_extract_item_with_password");
   LOADSYM(archive_extract_several)
 
   LOADSYM(extract_callback_new)
@@ -200,6 +201,13 @@ void libc7zip_item_free(item *i) {
 
 int libc7zip_archive_extract_item(archive *a, item *i, out_stream *os) {
   return archive_extract_item_(a, i, os);
+}
+
+int libc7zip_archive_extract_item_with_password(archive *a, item *i, out_stream *os, const char *password) {
+  if (!archive_extract_item_with_password_) {
+    return archive_extract_item_(a, i, os);
+  }
+  return archive_extract_item_with_password_(a, i, os, password);
 }
 
 int libc7zip_archive_extract_several(archive *a, int64_t *indices, int32_t num_indices, extract_callback *ec) {

@@ -570,6 +570,19 @@ func (a *Archive) Extract(i *Item, out *OutStream) error {
 	return nil
 }
 
+// ExtractWithPassword extracts an item with an explicit extraction password.
+func (a *Archive) ExtractWithPassword(i *Item, out *OutStream, password string) error {
+	cPassword := C.CString(password)
+	defer C.free(unsafe.Pointer(cPassword))
+	success := C.libc7zip_archive_extract_item_with_password(a.arch, i.item, out.strm, cPassword)
+	if success == 0 {
+		err := coalesceErrors(a.GetStreamError(), out.Error(), a.lib.Error(), ErrUnknownError)
+		return errors.WithStack(err)
+	}
+
+	return nil
+}
+
 type ExtractCallbackFuncs interface {
 	SetProgress(completed int64, total int64)
 	GetStream(item *Item) (*OutStream, error)
@@ -670,7 +683,9 @@ func inReadGo(id int64, data unsafe.Pointer, size int64, processedSize unsafe.Po
 		size = in.ChunkSize
 	}
 
-	if in.offset+size > in.size {
+	if in.offset >= in.size {
+		size = 0
+	} else if in.offset+size > in.size {
 		size = in.size - in.offset
 	}
 
@@ -690,12 +705,11 @@ func inReadGo(id int64, data unsafe.Pointer, size int64, processedSize unsafe.Po
 	processedSizePtr := (*int64)(processedSize)
 	*processedSizePtr = int64(readBytes)
 
-	if err != nil {
+	in.offset += int64(readBytes)
+	if err != nil && err != io.EOF {
 		in.err = err
 		return 1
 	}
-
-	in.offset += int64(readBytes)
 
 	in.err = nil
 	return 0
