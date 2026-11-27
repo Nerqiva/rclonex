@@ -26,14 +26,11 @@ func init() {
 	}
 }
 
-// lib7zipAvailable reports whether the engine can be loaded.
 func lib7zipAvailable() bool {
 	_, err := lib7zipLibrary()
 	return err == nil
 }
 
-// lib7zipReader adapts the ranged remote reader to the stream interface the
-// 7-Zip binding requires. The remote reader owns its own resources.
 type lib7zipReader struct {
 	*windowedReader
 }
@@ -61,8 +58,6 @@ func newLib7zipInStream(ctx context.Context, obj fs.Object, args lib7zipArgs) (*
 	return in, lr, nil
 }
 
-// lib7zipVolumes exposes a remote volume set through the callback interface
-// used by lib7zip. No volume is written to local storage.
 type lib7zipVolumes struct {
 	args    lib7zipArgs
 	volumes []sevenZipVolume
@@ -117,9 +112,8 @@ func lib7zipLibrary() (*sz.Lib, error) {
 	return lib7zipLib, lib7zipErr
 }
 
-// lib7zipEncryptionHint adds the --archive-password advice used by the
-// previous extractor. lib7zip reports encrypted headers as ErrNeedPassword
-// and encrypted contents as a failed extraction of entries marked encrypted.
+// lib7zip reports encrypted headers as ErrNeedPassword and encrypted contents
+// as a failed extraction of entries marked encrypted.
 func lib7zipEncryptionHint(err error, password string, encrypted bool) error {
 	if err == nil {
 		return nil

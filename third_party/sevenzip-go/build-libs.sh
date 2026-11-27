@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Build the matched libc7zip + 7z shared libraries used by the cgo engine.
-# Usage: build-libs.sh [build-dir] [output-dir]
 set -euo pipefail
 
 source_dir=${1:-${TMPDIR:-/tmp}/lib7zip-build}
@@ -38,8 +36,7 @@ if [ ! -d "$source_dir/.git" ]; then
 	git clone --depth 1 --branch "$tag" https://github.com/NyaMisty/libc7zip.git "$source_dir"
 fi
 
-# The fork does not export the FILETIME property accessor. Add it so item
-# modification times survive extraction; sz/glue.c treats it as optional.
+# libc7zip does not export the FILETIME property accessor; sz/glue.c treats it as optional.
 python3 - "$source_dir" <<'PY'
 import pathlib
 import sys
@@ -63,7 +60,7 @@ implementation = """MYEXPORT uint64_t item_get_filetime_property(item *i, int32_
 """
 
 # 7-Zip reads a RAR5 extraction password from the archive or item, not from the
-# password passed to OpenArchiveEx. Export the overload that sets the item password.
+# password passed to OpenArchiveEx.
 password_declaration = "MYEXPORT int archive_extract_item_with_password(archive *a, item *i, out_stream *os, const char *password);"
 password_header_anchor = "MYEXPORT int archive_extract_item(archive *a, item *i, out_stream *os);"
 password_source_anchor = "MYEXPORT int archive_extract_item(archive *a, item *i, out_stream *os) {"
@@ -128,8 +125,7 @@ if [ -n "$prebuilt_7z" ]; then
 		cp -a "$codec_dir" "$output_dir/Codecs"
 	fi
 else
-	# libc7zip's CMake downloads p7zip 16.02 during configuration. Use that
-	# 7z.so unless a compatible prebuilt binary is supplied.
+	# libc7zip's CMake downloads p7zip 16.02 during configuration.
 	engine_dir="$source_dir/build/upstream-7zip-src"
 	make -C "$engine_dir" common7z CXX="$cxx -std=c++11"
 	cp "$engine_dir/bin/7z.so" "$output_dir/"

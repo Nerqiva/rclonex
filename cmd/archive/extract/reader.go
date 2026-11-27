@@ -28,9 +28,7 @@ type window struct {
 }
 
 // windowedReader is a sliding-window io.ReaderAt + io.Seeker + io.Reader over
-// a byte stream fetched in ranged reads. Formats that need random access
-// (ZIP, 7z) fetch their header and footer with a small number of ranged
-// opens instead of one open per ReadAt.
+// a byte stream fetched in ranged reads.
 type windowedReader struct {
 	ctx        context.Context
 	fetch      rangeFetch

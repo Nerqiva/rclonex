@@ -57,8 +57,6 @@ func (r *failAfterReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// partialUploadFs stores a truncated object and then reports an upload error,
-// modelling a remote that has already accepted bytes when a decoder fails.
 type partialUploadFs struct {
 	fs.Fs
 }

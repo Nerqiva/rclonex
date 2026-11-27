@@ -20,8 +20,6 @@ type entryHandler func(nameInArchive string, size int64, modTime time.Time, isDi
 // bundled 7-Zip engine.
 func Lib7zipAvailable() bool { return lib7zipAvailable() }
 
-// lib7zipDecodeError marks a failure produced by the 7-Zip decoder rather
-// than by remote or destination I/O.
 type lib7zipDecodeError struct {
 	err error
 }
@@ -30,8 +28,6 @@ func (e *lib7zipDecodeError) Error() string { return e.err.Error() }
 
 func (e *lib7zipDecodeError) Unwrap() error { return e.err }
 
-// lib7zipArgs carries everything the 7-Zip engine needs to stream an archive
-// from a remote object into the destination.
 type lib7zipArgs struct {
 	ctx        context.Context
 	src        fs.Fs

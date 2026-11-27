@@ -106,10 +106,8 @@ func collectArchiveVolumes(ctx context.Context, src fs.Fs, srcFile string) ([]se
 }
 
 // archiveVolumeGap turns a missing volume in the middle of a set into a
-// named error. Sequential probing stops at the first absent name, so a later
-// volume must be found by listing the directory before the gap can be told
-// apart from the end of the set. A failed or unsupported list leaves the
-// original end-of-set behaviour intact.
+// named error. A later volume must be found by listing the directory before
+// the gap can be told apart from the end of the set.
 func archiveVolumeGap(ctx context.Context, src fs.Fs, scheme archiveVolumeScheme, missing string, next int) error {
 	dir := path.Dir(scheme.base)
 	if dir == "." {
