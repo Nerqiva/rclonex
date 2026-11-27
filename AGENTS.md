@@ -141,7 +141,8 @@ Uses golangci-lint v2 with config in `.golangci.yml`. Enabled linters: errcheck,
 
 This is the `rclonex` fork. `main` tracks upstream `master` plus rclonex changes. Releases are published by `.github/workflows/rclonex.yml`:
 
-- Pushing `main` (or running the workflow manually) publishes the version in `VERSION` as a rolling prerelease. Each run recreates the release and its tag on the pushed commit and force-copies `main` to `release/<version>` (e.g. `release/v2026.11.0-alpha.5`), so the version branch mirrors `main`. Existing full releases are never touched by this path.
+- Versions use daily CalVer `vYYYY.MM.DD.N-alpha`. On every push to `main` (or a manual run), the `version` job counts existing tags for the current UTC date, bumps `VERSION` and `fs/versiontag.go` to the next number, and commits `chore(release): YYYY.MM.DD.N-alpha [skip ci]`. Runs triggered by those release commits skip the rest of the workflow, so the bump cannot loop.
+- The build and release jobs publish the bumped commit as an alpha prerelease, recreate its tag, and force-copy `main` to `release/<version>` (e.g. `release/v2026.11.27.1-alpha`), so the version branch mirrors `main`. Existing full releases are never touched by this path.
 - A tag pushed on a `release/<tag>` branch publishes that tag; re-runs only refresh its assets.
 
-Versions with a suffix (e.g. `-alpha.1`) are GitHub pre-releases, plain CalVer versions are full releases so `releases/latest` resolves to them. The workflow list in the Actions tab is named for readability (`RcloneX: Test, Build & Release` is the fork's own CI).
+Agents never bump `VERSION` or `fs/versiontag.go` by hand. Versions with a suffix (e.g. `-alpha`) are GitHub pre-releases, plain CalVer versions are full releases so `releases/latest` resolves to them. The workflow list in the Actions tab is named for readability (`RcloneX: Test, Build & Release` is the fork's own CI).

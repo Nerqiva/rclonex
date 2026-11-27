@@ -16,7 +16,7 @@ archive extraction. This file tracks the work items. Tasks are tracked in this f
 | T6 | Test fixtures + integration tests for all six formats, encrypted and multi-volume variants, corrupt-archive and range-ignoring remotes | done | 6bc6d9c7e + 81cc2faa5 |
 | T7 | Documentation: fork/design notes, updated `archive extract` page, rebase guide, resource/limits discussion | done | this commit |
 | T8 | CI: full-suite regression on push, memory-bounded extraction test job, release workflow wiring (Calver tag → release branch → binaries + checksums) | pending | — |
-| T9 | First Calver alpha release `v2026.11.0-alpha.1` from `release/v2026.11.0-alpha.1` (release branch per version; the bootstrap pins the same string) | pending | — |
+| T9 | First daily-Calver alpha release `v2026.11.27.1-alpha` from `release/v2026.11.27.1-alpha` (release branch per version; version bumped by the workflow) | pending | — |
 | T10 | ISO9660 extraction (Rock Ridge/Joliet long names) via go-diskfs over the windowed range-read cache | done | this commit |
 | T11 | RAR4 recovery fallback via a pinned local go-unarr fork, enabled on native linux/amd64 and linux/arm64 releases (`CGO_ENABLED=1 -tags unarr`); built-in decoder stays primary | done | this commit |
 
@@ -49,10 +49,10 @@ Other release targets keep `CGO_ENABLED=0`, including Termux.
 - RAR multi-volume requires sibling volumes of the first volume to share the directory prefix; decoded with sequential volumes opened via the remote `fs.FS` adapter.
 - Writes never happen to the source; destination directories are created as upstream rclone does.
 
-## Release process (T9)
+## Release process
 
 1. Merge current work to `main`.
-2. `git checkout -b release/v2026.11.0-alpha.1` from `main` (one release branch per version).
-3. Ensure `VERSION` and `fs/versiontag.go` carry the Calver string; tag `v2026.11.0-alpha.1`.
-4. Push branch and tag; the `rclonex` workflow builds `linux/windows/darwin` (amd64/arm64/386) binaries named `rclonex`, attaches SHA256 checksums, and creates the (prerelease) GitHub release.
+2. The `version` job computes the next daily CalVer from existing tags, bumps `VERSION` and `fs/versiontag.go`, and commits `chore(release): <version> [skip ci]`.
+3. The workflow builds the bumped commit for `linux/windows/darwin` (amd64/arm64/386), attaches SHA256 checksums, creates the alpha prerelease and tag, and force-copies `main` to `release/<version>` (one release branch per version).
+4. Runs triggered by the release commit skip the workflow, so the bump cannot loop; re-runs on a version tag refresh assets only.
 5. Known gap: releases via `gh` CLI may hit the same token permission issue as issues/PRs — if so, binaries/checksums are still produced as workflow artifacts and the release is created manually.

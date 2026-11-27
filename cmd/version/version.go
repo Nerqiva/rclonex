@@ -134,7 +134,7 @@ func GetVersion(ctx context.Context, url string) (v *semver.Version, vs string, 
 
 // CheckVersion checks the installed version against available downloads
 func CheckVersion(ctx context.Context) {
-	vCurrent, err := semver.NewVersion(stripV(fs.Version))
+	vCurrent, err := fs.Semver(fs.Version)
 	if err != nil {
 		fs.Errorf(nil, "Failed to parse version: %v", err)
 	}
@@ -155,7 +155,7 @@ func CheckVersion(ctx context.Context) {
 			fmt.Printf("  upgrade: %s\n", url+vs)
 		}
 	}
-	fmt.Printf("yours:  %-13s\n", vCurrent)
+	fmt.Printf("yours:  %-13s\n", fs.Version)
 	printVersion(
 		"latest",
 		"https://downloads.rclone.org/",

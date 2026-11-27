@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/adrg/xdg"
-	"github.com/coreos/go-semver/semver"
 
 	"github.com/rclone/rclone/fs"
 	"github.com/rclone/rclone/fs/config/obscure"
@@ -231,7 +230,7 @@ This shows the current versions of rclone, Go and the OS:
 
 // Return version info
 func rcVersion(ctx context.Context, in Params) (out Params, err error) {
-	version, err := semver.NewVersion(fs.Version[1:])
+	version, err := fs.Semver(fs.Version)
 	if err != nil {
 		return nil, err
 	}

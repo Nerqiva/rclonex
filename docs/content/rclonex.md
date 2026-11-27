@@ -1,7 +1,7 @@
 ---
 title: "rclonex fork notes"
 description: "What rclonex adds to rclone: streaming remote-to-remote archive extraction"
-versionIntroduced: v2026.11.0-alpha.1
+versionIntroduced: v2026.11.27.1-alpha
 ---
 
 # rclonex fork notes
@@ -12,10 +12,10 @@ that streams archives directly from a source remote to a destination remote, wit
 and without ever staging the complete archive (or the extracted tree) on local disk.
 
 - Binary name: `rclonex` (`make` or `go build -o rclonex`)
-- Versioning: Calver `vYYYY.MM.MICRO-alpha.N` (see `VERSION`), one release branch per release
+- Versioning: daily Calver `vYYYY.MM.DD.N-alpha` (see `VERSION`), one release branch per release
   (`release/<tag>`), tags `v<calver>`
 - Module path: kept as `github.com/rclone/rclone` so upstream rebases stay mechanical
-- Version string: `fs/versiontag.go` is fork-maintained like upstream does at releases
+- Version string: `fs/versiontag.go` is bumped alongside `VERSION` by the release job
 
 ## What changed, at a glance
 
