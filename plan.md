@@ -43,10 +43,11 @@ Commits already on the branch:
 Files added or changed:
 
 - `third_party/sevenzip-go/` — vendored fork source, with `LibraryPath` override in `sz/libpath.go` and an optional filetime symbol in `sz/glue.c`.
-- `cmd/archive/extract/lib7zip_common.go` — shared argument type, format dispatch, and `errLib7zipUnavailable`.
-- `cmd/archive/extract/lib7zip.go` — cgo engine: ranged `InStream`, remote-backed multi-volume callbacks, per-entry streaming through `io.Pipe` into `entryHandler`, password, mtime fallback.
+- `cmd/archive/extract/lib7zip_common.go` — shared argument type and `entryHandler`.
+- `cmd/archive/extract/lib7zip.go` — cgo engine: ranged `InStream`, remote-backed multi-volume callbacks, per-entry streaming through `io.Pipe` into `entryHandler`, password, mtime fallback, content-based nested compression, and regeneration on backward seeks.
+- `cmd/archive/extract/nested_compression.go` — streaming Go codec adapters for compression wrappers the bundled 7-Zip cannot read.
 - `cmd/archive/extract/lib7zip_stub.go` — non-cgo stub.
-- `cmd/archive/extract/extract.go` — dispatch for `.7z` and `.7z.001`, with fallback to the previous extractor.
+- `cmd/archive/extract/extract.go` — unconditional dispatch to the engine for every format.
 - `go.mod`, `go.sum` — dependency and replace directive.
 
 Verification already done:
