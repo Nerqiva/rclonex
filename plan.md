@@ -172,3 +172,15 @@ Read this file, then:
 5. `/data/home/projects/rclone-7zip/archive/open.go`, `archive/extract.go`, and `rclone_utils/rcatsize.go` for password, multi-volume, and stream handling guidance.
 
 Do not start by converting more formats. Start with the library pair, because the current engine silently falls back and cannot prove any behaviour until it loads.
+
+## 9. Implementation status
+
+Steps 1, 2 and 4 are done on this branch. The 7z path is the default when the sidecars are present and passes password, encrypted-header, encrypted-content, multi-volume, mtime and byte-count parity tests.
+
+Build the matched Linux sidecars with `third_party/sevenzip-go/build-libs.sh [build-dir] [output-dir]`. Place `libc7zip.so`, `7z.so` and `Codecs/Rar.so` beside the `rclonex` binary, or set `RCLONE_7ZIP_LIB` to the absolute path of `libc7zip.so`. The `7z.so` built by p7zip 16.02 must match the library; an apt 25.01 `7z.so` segfaults in `OpenArchiveEx`. The build script adds the missing `item_get_filetime_property` export so modification times match the previous engine. Without the sidecars, extraction still falls back to the previous extractor and keeps working.
+
+An independent review found two regressions in the Step 4 fixes, both fixed and covered by tests: `uploadEntry` no longer deletes a pre-existing destination object when `Rcat` fails without returning an object, and `archives.Identify` now sniffs content before falling back to the filename so a misnamed archive is still decoded correctly. Encryption diagnostics were left as they were because the library reports a wrong password as `ErrNotSupportedArchive` and encrypted-content failures as short entries; the tests require the `--archive-password` hint in both cases.
+
+Step 3 is blocked, not skipped. The p7zip 16.02 `7z.so` registers only the 7z handler: opening generated ZIP and TAR streams through the same binding fails with `EOF` (reproduced with a standalone Go probe using the matched library pair; the itchio release library segfaults in `OpenArchiveEx`). Converting those formats, plus RAR and ISO, would lose verified behaviour, so they remain on the previous extractor until a multi-format plugin is available and green in a parity suite.
+
+Step 5 is partial. CI builds and packages the sidecars for `linux/amd64` and runs the engine tests in a dedicated job. `third_party/sevenzip-go/NOTICE.md` records the 7-Zip LGPL 2.1 plus extra terms, lib7zip MPL 2.0 and the LGPL 2.1 UTF conversion code. The other release targets keep their current cgo settings; cross-compiled lib7zip libraries for those targets are not in place.
