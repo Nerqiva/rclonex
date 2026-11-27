@@ -302,6 +302,24 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 			fs.Infof(nil, "Total files extracted %d", filesExtracted)
 			return err
 		}
+		if lib7zipHandles(srcFile) {
+			err := extractWithLib7zip(lib7zipArgs{
+				ctx:        ctx,
+				src:        src,
+				srcObj:     srcObj,
+				srcFile:    srcFile,
+				windowSize: opts.WindowSize,
+				tr:         tr,
+				password:   opts.Password,
+				options:    options,
+				handle:     handleEntry,
+			})
+			if !errors.Is(err, errLib7zipUnavailable) {
+				fs.Infof(nil, "Total files extracted %d", filesExtracted)
+				return err
+			}
+			fs.Debugf(nil, "7-Zip engine unavailable, using the previous extractor")
+		}
 		format, buffered, err := archives.Identify(ctx, "", in)
 		if err != nil {
 			return fmt.Errorf("failed to open check file type: %w", err)

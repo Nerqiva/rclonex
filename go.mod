@@ -17,6 +17,7 @@ require (
 	github.com/FilenCloudDienste/filen-sdk-go v0.0.40
 	github.com/Files-com/files-sdk-go/v3 v3.3.194
 	github.com/Max-Sum/base32768 v0.0.0-20230304063302-18e6ce5945fd
+	github.com/itchio/sevenzip-go v0.0.0
 	github.com/a1ex3/zstd-seekable-format-go/pkg v0.10.0
 	github.com/a8m/tree v0.0.0-20240104212747-2c8764a5f17e
 	github.com/aalpar/deheap v1.1.2
@@ -288,3 +289,5 @@ require (
 )
 
 replace github.com/gen2brain/go-unarr => ./third_party/go-unarr
+
+replace github.com/itchio/sevenzip-go => ./third_party/sevenzip-go
