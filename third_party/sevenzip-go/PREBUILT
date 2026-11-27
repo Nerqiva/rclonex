@@ -1,0 +1,3 @@
+PREBUILT_VERSION=v17.05
+PREBUILT_URL=https://github.com/p7zip-project/p7zip/releases/download/v17.05/linux-p7zip.zip
+PREBUILT_SHA256=5c14a69015342c0724bfa2c6937dea1989858c29dc725b8c2fbe2ef0f584e0a7

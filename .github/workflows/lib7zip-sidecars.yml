@@ -1,0 +1,144 @@
+---
+
+name: "RcloneX: lib7zip sidecars"
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 4 * * 1'
+  push:
+    branches:
+      - main
+      - experimental/lib7zip-engine
+    paths:
+      - .github/workflows/lib7zip-sidecars.yml
+      - third_party/sevenzip-go/PREBUILT
+      - third_party/sevenzip-go/build-libs.sh
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    name: resolve upstream version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      tag: ${{ steps.vars.outputs.tag }}
+      cached: ${{ steps.cache.outputs.cached }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read pinned upstream version
+        id: vars
+        run: |
+          set -euo pipefail
+          . third_party/sevenzip-go/PREBUILT
+          echo "version=$PREBUILT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=lib7zip-sidecars-$PREBUILT_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Check for reusable sidecars
+        id: cache
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.vars.outputs.tag }}
+        run: |
+          set -euo pipefail
+          echo "cached=false" >> "$GITHUB_OUTPUT"
+          gh release view "$TAG" >/dev/null 2>&1 || exit 0
+          names="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          for asset in lib7zip-linux-amd64.tar.gz lib7zip-linux-arm64.tar.gz; do
+            echo "$names" | grep -qx "$asset" || exit 0
+          done
+          echo "cached=true" >> "$GITHUB_OUTPUT"
+          echo "Reusing sidecars from $TAG"
+
+  build:
+    name: build ${{ matrix.target }} sidecars
+    needs: resolve
+    if: needs.resolve.outputs.cached != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            prebuilt: true
+          - target: linux-arm64
+            prebuilt: false
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install native build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq cmake python3 curl unzip
+          if [ "${{ matrix.target }}" = linux-arm64 ]; then
+            sudo apt-get install -y -qq gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          fi
+      - name: Download compatible prebuilt engine
+        if: matrix.prebuilt
+        run: |
+          set -euo pipefail
+          . third_party/sevenzip-go/PREBUILT
+          curl -fsSL -o "$RUNNER_TEMP/prebuilt.zip" "$PREBUILT_URL"
+          echo "$PREBUILT_SHA256  $RUNNER_TEMP/prebuilt.zip" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/prebuilt"
+          unzip -q -o "$RUNNER_TEMP/prebuilt.zip" '7z.so' 'Codecs/*' -d "$RUNNER_TEMP/prebuilt"
+          echo "LIB7ZIP_7Z_SO=$RUNNER_TEMP/prebuilt/7z.so" >> "$GITHUB_ENV"
+          echo "LIB7ZIP_CODECS_DIR=$RUNNER_TEMP/prebuilt/Codecs" >> "$GITHUB_ENV"
+      - name: Build sidecars
+        env:
+          LIB7ZIP_CXX: ${{ matrix.target == 'linux-arm64' && 'aarch64-linux-gnu-g++' || 'g++' }}
+          LIB7ZIP_CMAKE_ARGS: ${{ matrix.target == 'linux-arm64' && '-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++' || '' }}
+        run: |
+          third_party/sevenzip-go/build-libs.sh \
+            "$RUNNER_TEMP/lib7zip-build" "$RUNNER_TEMP/lib7zip"
+      - name: Package sidecars
+        run: |
+          set -euo pipefail
+          stage="$RUNNER_TEMP/stage-${{ matrix.target }}"
+          mkdir -p "$stage"
+          cp "$RUNNER_TEMP/lib7zip/libc7zip.so" "$RUNNER_TEMP/lib7zip/7z.so" "$stage/"
+          if [ -d "$RUNNER_TEMP/lib7zip/Codecs" ]; then
+            cp -a "$RUNNER_TEMP/lib7zip/Codecs" "$stage/"
+          fi
+          cp third_party/sevenzip-go/NOTICE.md "$stage/"
+          cp -a third_party/sevenzip-go/licenses "$stage/"
+          tar -C "$stage" -czf "$RUNNER_TEMP/lib7zip-${{ matrix.target }}.tar.gz" .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lib7zip-${{ matrix.target }}
+          path: ${{ runner.temp }}/lib7zip-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: publish reusable sidecars
+    needs: [resolve, build]
+    if: needs.resolve.outputs.cached != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Read upstream version
+        id: vars
+        run: |
+          set -euo pipefail
+          . third_party/sevenzip-go/PREBUILT
+          echo "tag=lib7zip-sidecars-$PREBUILT_VERSION" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: lib7zip-*
+          path: ${{ runner.temp }}/sidecars
+          merge-multiple: true
+      - name: Publish release assets
+        run: |
+          set -euo pipefail
+          . third_party/sevenzip-go/PREBUILT
+          tag="lib7zip-sidecars-$PREBUILT_VERSION"
+          gh release view "$tag" >/dev/null 2>&1 || \
+            gh release create "$tag" --title "lib7zip sidecars" \
+              --notes "Reusable lib7zip sidecars for upstream $PREBUILT_VERSION."
+          gh release upload "$tag" "$RUNNER_TEMP"/sidecars/*.tar.gz --clobber

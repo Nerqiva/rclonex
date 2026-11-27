@@ -6,10 +6,33 @@ set -euo pipefail
 source_dir=${1:-${TMPDIR:-/tmp}/lib7zip-build}
 output_dir=${2:-$(pwd)/lib7zip}
 tag=v1.8.0
+cxx=${LIB7ZIP_CXX:-g++}
+prebuilt_7z=${LIB7ZIP_7Z_SO:-}
+codec_dir=${LIB7ZIP_CODECS_DIR:-}
 
-for tool in git cmake make g++ python3; do
+for tool in git cmake make "$cxx" python3; do
 	command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
 done
+
+if [ -z "$prebuilt_7z" ] && [ -z "${LIB7ZIP_CXX:-}" ] && [ "$(uname -s)" = Linux ] && [ "$(uname -m)" = x86_64 ]; then
+	for tool in curl unzip sha256sum; do
+		command -v "$tool" >/dev/null || { echo "missing required tool: $tool" >&2; exit 1; }
+	done
+	# shellcheck disable=SC1091
+	. "$(dirname "$0")/PREBUILT"
+	cache_dir="$source_dir/prebuilt"
+	mkdir -p "$cache_dir"
+	zip_path="$cache_dir/prebuilt.zip"
+	if [ ! -f "$zip_path" ] || ! echo "$PREBUILT_SHA256  $zip_path" | sha256sum -c - >/dev/null 2>&1; then
+		curl -fsSL "$PREBUILT_URL" -o "$zip_path"
+		echo "$PREBUILT_SHA256  $zip_path" | sha256sum -c -
+	fi
+	rm -rf "$cache_dir/extracted"
+	mkdir -p "$cache_dir/extracted"
+	unzip -q "$zip_path" '7z.so' 'Codecs/*' -d "$cache_dir/extracted"
+	prebuilt_7z="$cache_dir/extracted/7z.so"
+	codec_dir="$cache_dir/extracted/Codecs"
+fi
 
 if [ ! -d "$source_dir/.git" ]; then
 	git clone --depth 1 --branch "$tag" https://github.com/NyaMisty/libc7zip.git "$source_dir"
@@ -91,15 +114,25 @@ if old in cb:
 callback.write_text(cb)
 PY
 
-cmake -S "$source_dir" -B "$source_dir/build"
+CXX="$cxx" cmake -S "$source_dir" -B "$source_dir/build" ${LIB7ZIP_CMAKE_ARGS:-}
 cmake --build "$source_dir/build" --parallel
-
-# libc7zip's CMake downloads p7zip 16.02 during configuration. The 7z plugin
-# must come from that same tree: newer 7z.so builds crash in OpenArchiveEx.
-engine_dir="$source_dir/build/upstream-7zip-src"
-make -C "$engine_dir" common7z CXX="g++ -std=c++11"
 
 mkdir -p "$output_dir"
 cp "$source_dir/build/libc7zip.so" "$output_dir/"
-cp "$engine_dir/bin/7z.so" "$output_dir/"
+
+if [ -n "$prebuilt_7z" ]; then
+	[ -f "$prebuilt_7z" ] || { echo "prebuilt 7z.so not found: $prebuilt_7z" >&2; exit 1; }
+	cp "$prebuilt_7z" "$output_dir/7z.so"
+	if [ -n "$codec_dir" ]; then
+		[ -d "$codec_dir" ] || { echo "codec directory not found: $codec_dir" >&2; exit 1; }
+		cp -a "$codec_dir" "$output_dir/Codecs"
+	fi
+else
+	# libc7zip's CMake downloads p7zip 16.02 during configuration. Use that
+	# 7z.so unless a compatible prebuilt binary is supplied.
+	engine_dir="$source_dir/build/upstream-7zip-src"
+	make -C "$engine_dir" common7z CXX="$cxx -std=c++11"
+	cp "$engine_dir/bin/7z.so" "$output_dir/"
+fi
+
 echo "lib7zip sidecars written to $output_dir"

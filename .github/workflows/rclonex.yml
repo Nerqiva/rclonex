@@ -65,6 +65,9 @@ jobs:
             echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           fi
 
+  sidecars:
+    uses: ./.github/workflows/lib7zip-sidecars.yml
+
   test:
     name: test
     needs: version
@@ -91,14 +94,12 @@ jobs:
         run: ./rclonex version
       - name: Unit tests (archive, fs, lib)
         run: go test -timeout 20m ./cmd/archive/... ./fs/... ./lib/...
-      - name: Unit tests with unarr fallback
-        run: go test -tags unarr -timeout 20m ./cmd/archive/extract/
       - name: Regression tests (short, all packages)
         run: go test -short -timeout 20m ./...
 
   lib7zip:
     name: test (lib7zip engine)
-    needs: version
+    needs: [version, sidecars]
     if: needs.version.outputs.skip_run != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -110,8 +111,17 @@ jobs:
         with:
           go-version: '1.26.11'
           cache: true
-      - name: Build matched lib7zip sidecars
-        run: third_party/sevenzip-go/build-libs.sh "$RUNNER_TEMP/lib7zip-build" "$RUNNER_TEMP/lib7zip"
+      - name: Download cached lib7zip sidecars
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          . third_party/sevenzip-go/PREBUILT
+          gh release download "lib7zip-sidecars-$PREBUILT_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'lib7zip-linux-amd64.tar.gz' \
+            --dir "$RUNNER_TEMP"
+          mkdir -p "$RUNNER_TEMP/lib7zip"
+          tar -xzf "$RUNNER_TEMP/lib7zip-linux-amd64.tar.gz" -C "$RUNNER_TEMP/lib7zip"
       - name: Compile extract tests beside the sidecars
         run: |
           go test -c -o "$RUNNER_TEMP/lib7zip/extract.test" ./cmd/archive/extract
@@ -143,7 +153,7 @@ jobs:
 
   build:
     name: build (${{ matrix.asset || matrix.goos }}/${{ matrix.goarch }})
-    needs: version
+    needs: [version, sidecars]
     if: needs.version.outputs.skip_run != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -151,9 +161,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { goos: linux, goarch: amd64, cgo: '1', gotags: unarr, lib7zip: true }
+          - { goos: linux, goarch: amd64, cgo: '1', lib7zip: true }
           - { goos: linux, goarch: '386' }
-          - { goos: linux, goarch: arm64, cgo: '1', gotags: unarr, cc: aarch64-linux-gnu-gcc }
+          - { goos: linux, goarch: arm64, cgo: '1', cc: aarch64-linux-gnu-gcc, lib7zip: true }
           - { goos: linux, goarch: arm64, asset: termux }
           - { goos: windows, goarch: amd64 }
           - { goos: windows, goarch: arm64 }
@@ -175,22 +185,26 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: ${{ matrix.cgo || '0' }}
-          GOTAGS: ${{ matrix.gotags || '' }}
           CC: ${{ matrix.cc || '' }}
         run: |
           mkdir -p stage
           if [ "$GOOS" = windows ]; then
-            go build -trimpath ${GOTAGS:+-tags "$GOTAGS"} -o stage/rclonex.exe -ldflags "-s -X github.com/rclone/rclone/fs.Version=$(cat VERSION)" .
+            go build -trimpath -o stage/rclonex.exe -ldflags "-s -X github.com/rclone/rclone/fs.Version=$(cat VERSION)" .
           else
-            go build -trimpath ${GOTAGS:+-tags "$GOTAGS"} -o stage/rclonex -ldflags "-s -X github.com/rclone/rclone/fs.Version=$(cat VERSION)" .
+            go build -trimpath -o stage/rclonex -ldflags "-s -X github.com/rclone/rclone/fs.Version=$(cat VERSION)" .
           fi
-      - name: Build lib7zip sidecars
+      - name: Fetch lib7zip sidecars
         if: matrix.lib7zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIDECAR: lib7zip-${{ matrix.asset || matrix.goos }}-${{ matrix.goarch }}.tar.gz
         run: |
-          third_party/sevenzip-go/build-libs.sh "$RUNNER_TEMP/lib7zip-build" "$RUNNER_TEMP/lib7zip"
-          cp "$RUNNER_TEMP/lib7zip/libc7zip.so" "$RUNNER_TEMP/lib7zip/7z.so" stage/
-          cp third_party/sevenzip-go/NOTICE.md stage/
-          cp -r third_party/sevenzip-go/licenses stage/
+          . third_party/sevenzip-go/PREBUILT
+          gh release download "lib7zip-sidecars-$PREBUILT_VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$SIDECAR" \
+            --dir "$RUNNER_TEMP"
+          tar -xzf "$RUNNER_TEMP/$SIDECAR" -C stage
       - name: Package
         run: |
           cd stage
