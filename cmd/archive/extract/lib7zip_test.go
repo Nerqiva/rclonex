@@ -62,7 +62,7 @@ func TestLib7zipUnsupportedArchiveWithoutPassword(t *testing.T) {
 	require.NotContains(t, err.Error(), "--archive-password")
 }
 
-func TestLib7zipUnsupportedRar5Method(t *testing.T) {
+func TestLib7zipRar5Method(t *testing.T) {
 	if _, err := lib7zipLibrary(); err != nil {
 		t.Skipf("lib7zip engine unavailable: %v", err)
 	}
@@ -76,7 +76,15 @@ func TestLib7zipUnsupportedRar5Method(t *testing.T) {
 	require.NoError(t, err)
 
 	err = ArchiveExtract(ctx, dst, "", src, "encrypted.rar", ExtractOptions{Password: "rclonex"})
-	require.Error(t, err)
+	require.NoError(t, err)
+	obj, err := dst.NewObject(ctx, "hello.txt")
+	require.NoError(t, err)
+	in, err := obj.Open(ctx)
+	require.NoError(t, err)
+	got, err := io.ReadAll(in)
+	require.NoError(t, err)
+	require.NoError(t, in.Close())
+	assert.Equal(t, "hello rclonex\n", string(got))
 }
 
 func TestLib7zipParity(t *testing.T) {

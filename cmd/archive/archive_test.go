@@ -212,6 +212,9 @@ func testArchive(t *testing.T) {
 }
 
 func TestIntegration(t *testing.T) {
+	if !extract.Lib7zipAvailable() {
+		t.Skip("7-Zip engine unavailable in this build")
+	}
 	testArchive(t)
 }
 
@@ -236,6 +239,9 @@ func craftZip(t *testing.T, entries []struct{ name, content string }) string {
 // escape the destination directory with ".." components is rejected and does
 // not write anything outside the destination (GHSA-4vr5-p2gc-h23p).
 func TestExtractPathTraversal(t *testing.T) {
+	if !extract.Lib7zipAvailable() {
+		t.Skip("7-Zip engine unavailable in this build")
+	}
 	ctx := context.Background()
 
 	for _, tc := range []struct {
@@ -270,6 +276,9 @@ func TestExtractPathTraversal(t *testing.T) {
 }
 
 func TestMemory(t *testing.T) {
+	if !extract.Lib7zipAvailable() {
+		t.Skip("7-Zip engine unavailable in this build")
+	}
 	if *fstest.RemoteName != "" {
 		t.Skip("skipping as -remote is set")
 	}

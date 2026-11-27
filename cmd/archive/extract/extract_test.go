@@ -324,7 +324,7 @@ func TestArchiveExtractRangeNotSupported(t *testing.T) {
 
 func TestArchiveExtractPassword(t *testing.T) {
 	requireLib7zip(t)
-	for _, name := range []string{"encrypted.7z", "encrypted-files.7z"} {
+	for _, name := range []string{"encrypted.7z", "encrypted-files.7z", "encrypted.rar"} {
 		for _, tc := range []struct {
 			name     string
 			password string

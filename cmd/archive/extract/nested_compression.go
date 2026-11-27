@@ -95,7 +95,13 @@ func openGoCompression(kind goCompression, args lib7zipArgs) (io.ReadCloser, err
 	in := io.NopCloser(base)
 	switch kind {
 	case goCompressionZstd:
-		zr, err := zstd.NewReader(in)
+		max := uint64(archiveBufferSize())
+		zr, err := zstd.NewReader(in,
+			zstd.WithDecoderConcurrency(1),
+			zstd.WithDecoderLowmem(true),
+			zstd.WithDecoderMaxMemory(max),
+			zstd.WithDecoderMaxWindow(max),
+		)
 		if err != nil {
 			_ = in.Close()
 			return nil, err

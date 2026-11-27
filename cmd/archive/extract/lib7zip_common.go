@@ -16,6 +16,10 @@ import (
 // return a fresh reader for the entry's contents on each call.
 type entryHandler func(nameInArchive string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error
 
+// Lib7zipAvailable reports whether this build can extract archives with the
+// bundled 7-Zip engine.
+func Lib7zipAvailable() bool { return lib7zipAvailable() }
+
 // lib7zipDecodeError marks a failure produced by the 7-Zip decoder rather
 // than by remote or destination I/O.
 type lib7zipDecodeError struct {
