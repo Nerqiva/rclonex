@@ -12,8 +12,6 @@ import (
 	"github.com/nwaples/rardecode/v2"
 )
 
-// entryHandler extracts one archive entry. It is shared by every extraction
-// path in this package.
 type entryHandler func(nameInArchive string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error
 
 // errRAR4FallbackUnavailable is returned by the fallback when this build does
@@ -42,10 +40,6 @@ func isRAR4(in io.ReadSeeker) bool {
 
 // isRecoverableRAR4DecodeError reports whether err is a rardecode decoder
 // failure that another RAR4 decoder might be able to recover from.
-//
-// It deliberately only accepts decoder sentinels. Remote I/O, destination
-// I/O, permissions, cancellation and infrastructure errors never match, even
-// when they are wrapped by the extraction library.
 func isRecoverableRAR4DecodeError(err error) bool {
 	if err == nil {
 		return false

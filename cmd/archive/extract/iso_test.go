@@ -18,9 +18,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// makeISO builds a real ISO9660 image holding the entries, with Rock
-// Ridge enabled so names keep their case and the modtime is preserved.
-// The image is produced by go-diskfs itself and returned as bytes.
 func makeISO(t *testing.T, entries []testArchiveEntry) []byte {
 	t.Helper()
 	workspace := t.TempDir()
@@ -56,12 +53,12 @@ func TestArchiveExtractISO(t *testing.T) {
 	_, err := operations.Rcat(ctx, src, "test.iso", io.NopCloser(bytes.NewReader(makeISO(t, entries))), time.Unix(1735689600, 0).UTC(), nil)
 	require.NoError(t, err)
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "test.iso"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "test.iso", DefaultExtractOptions()))
 	checkExtracted(t, ctx, dst, entries)
 }
 
 func TestArchiveExtractISOWindowSizeZero(t *testing.T) {
-	ctx := withExtractOptions(context.Background(), extractOptions{windowSize: 0})
+	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
 	entries := testArchiveEntries()
@@ -69,12 +66,12 @@ func TestArchiveExtractISOWindowSizeZero(t *testing.T) {
 	_, err := operations.Rcat(ctx, src, "test.iso", io.NopCloser(bytes.NewReader(makeISO(t, entries))), time.Unix(1735689600, 0).UTC(), nil)
 	require.NoError(t, err)
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "test.iso"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "test.iso", ExtractOptions{WindowSize: 0}))
 	checkExtracted(t, ctx, dst, entries)
 }
 
 func TestArchiveExtractISOPasswordRejected(t *testing.T) {
-	ctx := withExtractOptions(context.Background(), extractOptions{password: "secret"})
+	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
 	entries := testArchiveEntries()
@@ -82,7 +79,7 @@ func TestArchiveExtractISOPasswordRejected(t *testing.T) {
 	_, err := operations.Rcat(ctx, src, "test.iso", io.NopCloser(bytes.NewReader(makeISO(t, entries))), time.Unix(1735689600, 0).UTC(), nil)
 	require.NoError(t, err)
 
-	err = ArchiveExtract(ctx, dst, "", src, "test.iso")
+	err = ArchiveExtract(ctx, dst, "", src, "test.iso", ExtractOptions{Password: "secret"})
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "--archive-password")
 }
@@ -97,7 +94,7 @@ func TestArchiveExtractISONotISO(t *testing.T) {
 	_, err := operations.Rcat(ctx, src, "not.iso", io.NopCloser(bytes.NewReader(data)), time.Unix(1735689600, 0).UTC(), nil)
 	require.NoError(t, err)
 
-	err = ArchiveExtract(ctx, dst, "", src, "not.iso")
+	err = ArchiveExtract(ctx, dst, "", src, "not.iso", DefaultExtractOptions())
 	assert.Error(t, err)
 }
 

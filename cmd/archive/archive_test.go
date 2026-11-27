@@ -122,7 +122,7 @@ func testArchiveRemote(t *testing.T, fromLocal bool, subDir string, extension st
 	fstest.CheckItems(t, src)
 
 	// extract dst archive back to src
-	err = extract.ArchiveExtract(ctx, src, subDir, dst, archiveName)
+	err = extract.ArchiveExtract(ctx, src, subDir, dst, archiveName, extract.DefaultExtractOptions())
 	require.NoError(t, err)
 
 	// check files on src are restored from the archive on dst
@@ -256,7 +256,7 @@ func TestExtractPathTraversal(t *testing.T) {
 
 			// Extract into a subdirectory so a successful escape would land
 			// in "safe/escaped.txt", a sibling of the "safe/prefix" target.
-			err := extract.ArchiveExtract(ctx, r.Flocal, "safe/prefix", r.Fremote, "malicious.zip")
+			err := extract.ArchiveExtract(ctx, r.Flocal, "safe/prefix", r.Fremote, "malicious.zip", extract.DefaultExtractOptions())
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "..")
 

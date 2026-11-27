@@ -53,8 +53,6 @@ func (s *rar4Stream) check() error {
 	return s.r.ctx.Err()
 }
 
-// unarrEntryReader streams one entry from the unarr decoder. It never reads
-// past the entry and never materialises the whole entry in memory.
 type unarrEntryReader struct {
 	archive   *unarr.Archive
 	stream    *rar4Stream
@@ -85,28 +83,14 @@ func (e *unarrEntryReader) Close() error {
 
 var _ io.ReadCloser = (*unarrEntryReader)(nil)
 
-// extractRAR4WithUnarr extracts a RAR4 archive through the bundled unarr C
-// decoder, reading ranged windows straight from the remote object. Files are
-// written by handleEntry, so they use the same remote output path as the
-// primary decoder.
-func extractRAR4WithUnarr(ctx context.Context, srcObj fs.Object, windowSize int64, tr *accounting.Transfer, handleEntry entryHandler) error {
-	var options []fs.OpenOption
-	for _, option := range fs.GetConfig(ctx).DownloadHeaders {
-		options = append(options, option)
-	}
-	fetch := func(ctx context.Context, off, want int64) (io.ReadCloser, error) {
-		ranged := make([]fs.OpenOption, 0, len(options)+1)
-		ranged = append(ranged, options...)
-		ranged = append(ranged, &fs.RangeOption{Start: off, End: off + want - 1})
-		return srcObj.Open(ctx, ranged...)
-	}
-	return extractRAR4FromFetch(ctx, srcObj.Size(), windowSize, tr, fetch, handleEntry)
+type rar4Fetch struct {
+	size       int64
+	windowSize int64
+	fetch      rangeFetch
 }
 
-// extractRAR4FromFetch is extractRAR4WithUnarr with the remote fetch injected,
-// so the decoder can be exercised over an in-memory archive in tests.
-func extractRAR4FromFetch(ctx context.Context, size, windowSize int64, tr *accounting.Transfer, fetch func(context.Context, int64, int64) (io.ReadCloser, error), handleEntry entryHandler) error {
-	w := newWindowedReaderFromFetch(ctx, size, windowSize, tr, fetch)
+func (f rar4Fetch) extract(ctx context.Context, handleEntry entryHandler) error {
+	w := newWindowedReaderFromFetch(ctx, f.size, f.windowSize, f.fetch)
 	stream := &rar4Stream{r: w}
 	archive, err := unarr.NewArchiveFromStream(&unarr.StreamOps{
 		Read: stream.read,
@@ -151,4 +135,16 @@ func extractRAR4FromFetch(ctx context.Context, size, windowSize int64, tr *accou
 			return err
 		}
 	}
+}
+
+func extractRAR4WithUnarr(ctx context.Context, srcObj fs.Object, windowSize int64, tr *accounting.Transfer, handleEntry entryHandler) error {
+	var options []fs.OpenOption
+	for _, option := range fs.GetConfig(ctx).DownloadHeaders {
+		options = append(options, option)
+	}
+	return rar4Fetch{
+		size:       srcObj.Size(),
+		windowSize: windowSize,
+		fetch:      objectFetch(srcObj, tr, options...),
+	}.extract(ctx, handleEntry)
 }

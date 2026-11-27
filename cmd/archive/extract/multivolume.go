@@ -98,8 +98,6 @@ func (r remoteFS) Open(name string) (iofs.File, error) {
 	if err != nil {
 		return nil, &iofs.PathError{Op: "open", Path: name, Err: err}
 	}
-	// Normalize before accounting so the transfer observes the same reads
-	// rardecode consumes
 	rc = &eofNormalizeReader{rc: rc}
 	size := obj.Size()
 	if size >= 0 {
@@ -111,8 +109,6 @@ func (r remoteFS) Open(name string) (iofs.File, error) {
 	return &remoteFile{ctx: r.ctx, name: path.Base(clean), obj: obj, rc: rc, size: size}, nil
 }
 
-// remoteFile is an io/fs.File backed by a remote rclone object. The bytes
-// read through Read are counted into the archive transfer.
 type remoteFile struct {
 	ctx  context.Context
 	name string
@@ -121,17 +117,14 @@ type remoteFile struct {
 	size int64
 }
 
-// Read reads bytes from the volume.
 func (f *remoteFile) Read(p []byte) (int, error) {
 	return f.rc.Read(p)
 }
 
-// Close closes the volume.
 func (f *remoteFile) Close() error {
 	return f.rc.Close()
 }
 
-// Stat returns the volume's file info.
 func (f *remoteFile) Stat() (iofs.FileInfo, error) {
 	if f.size < 0 {
 		return nil, fmt.Errorf("volume %q has unknown size", f.name)
@@ -143,29 +136,22 @@ func (f *remoteFile) Stat() (iofs.FileInfo, error) {
 	}, nil
 }
 
-// remoteFileInfo is a read-only io/fs.FileInfo for an archive volume.
 type remoteFileInfo struct {
 	name    string
 	size    int64
 	modTime time.Time
 }
 
-// Name returns the base name of the volume.
 func (i remoteFileInfo) Name() string { return i.name }
 
-// Size returns the size of the volume in bytes.
 func (i remoteFileInfo) Size() int64 { return i.size }
 
-// Mode returns the volume's mode (read-only).
 func (i remoteFileInfo) Mode() iofs.FileMode { return 0o444 }
 
-// ModTime returns the volume's modification time.
 func (i remoteFileInfo) ModTime() time.Time { return i.modTime }
 
-// IsDir returns false - a volume is not a directory.
 func (i remoteFileInfo) IsDir() bool { return false }
 
-// Sys returns nil.
 func (i remoteFileInfo) Sys() any { return nil }
 
 // sevenZipVolume is one volume of a multi-volume 7z archive. base is the
@@ -220,22 +206,7 @@ func collectSevenZipVolumes(ctx context.Context, src fs.Fs, srcFile string) ([]s
 	return volumes, total, nil
 }
 
-// concatFetch returns the fetch closure for newWindowedReaderFromFetch
-// serving the concatenation of volumes as one stream. fetch(off, want)
-// returns a ReadCloser yielding exactly want bytes; the reads map onto
-// per-volume windowedReaders constructed lazily with direct ranged
-// fetches (no caching window) with the same acc and options as the
-// outer reader.
-//
-// The volume readers account the fetched bytes into acc; the outer reader
-// must be constructed without an accounting transfer or the bytes would be
-// counted twice. The per-volume readers keep no buffers of their own - the
-// outer reader's window is the cache - so the memory footprint does not
-// grow with the number of volumes. The volume sizes are known from
-// collectSevenZipVolumes, so a volume shrinking between Stat and Open
-// surfaces as a short read and is reported by the outer refill's
-// exact-byte-count verification.
-func concatFetch(ctx context.Context, volumes []sevenZipVolume, acc *accounting.Transfer, options ...fs.OpenOption) func(context.Context, int64, int64) (io.ReadCloser, error) {
+func concatFetch(ctx context.Context, volumes []sevenZipVolume, acc *accounting.Transfer, options ...fs.OpenOption) rangeFetch {
 	state := &concatState{
 		ctx:     ctx,
 		volumes: volumes,
@@ -251,10 +222,6 @@ func concatFetch(ctx context.Context, volumes []sevenZipVolume, acc *accounting.
 	}
 }
 
-// concatState holds the volumes and the lazily constructed per-volume
-// windowed readers shared by all concatVolumesReaders. The per-volume
-// readers fetch spans directly and retain no bytes, so keeping them
-// forever costs nothing.
 type concatState struct {
 	ctx     context.Context
 	volumes []sevenZipVolume
@@ -263,8 +230,6 @@ type concatState struct {
 	readers []*windowedReader
 }
 
-// readerFor returns the windowed reader for volume i, constructing it on
-// first use.
 func (s *concatState) readerFor(i int) (*windowedReader, error) {
 	if s.readers[i] == nil {
 		r, err := newWindowedReader(s.ctx, s.volumes[i].obj, 0, s.acc, s.options...)
@@ -284,7 +249,6 @@ type concatVolumesReader struct {
 	end   int64
 }
 
-// Read reads bytes from the concatenated stream.
 func (r *concatVolumesReader) Read(p []byte) (int, error) {
 	if r.pos >= r.end {
 		return 0, io.EOF

@@ -31,7 +31,6 @@ REPO="Nerqiva/rclonex"
 
 usage() { echo "Usage: sudo -v ; curl -fsSL https://raw.githubusercontent.com/${REPO}/main/bin/install-rclonex.sh | sudo bash [-s beta]" 1>&2; exit 1; }
 
-#check for beta flag
 if [ -n "$1" ] && [ "$1" != "beta" ]; then
     usage
 fi
@@ -40,15 +39,12 @@ if [ -n "$1" ]; then
     install_beta="beta "
 fi
 
-# Keep rclone's config out of root's home when run under sudo
 export XDG_CONFIG_HOME=config
 
-#create tmp directory and move to it with macOS compatibility fallback
 tmp_dir=$(mktemp -d 2>/dev/null || mktemp -d -t 'rclonex-install.XXXXXXXXXX')
 trap 'cd / && rm -rf "$tmp_dir"' EXIT
 cd "$tmp_dir"
 
-# check required tools
 for tool in curl tar grep cut awk head; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         printf "\nRequired tool '%s' not found. Please install it and try again.\n\n" "$tool"
@@ -72,8 +68,6 @@ else
     exit 4
 fi
 
-# resolve the target release tag (GitHub returns pretty printed JSON, so parse
-# with grep/cut rather than requiring jq)
 if [ -n "${RCLONEX_RELEASE_TAG:-}" ]; then
     target_tag=$RCLONEX_RELEASE_TAG
 else
@@ -85,7 +79,6 @@ else
         }
     else
         releases_json=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>errors) || {
-            # no stable release yet - install the newest pre-release instead
             echo 'No stable release exists yet - installing the latest pre-release instead.'
             install_beta="beta "
             releases_api="https://api.github.com/repos/${REPO}/releases?per_page=1"
@@ -102,14 +95,12 @@ if [ -z "$target_tag" ]; then
     exit 1
 fi
 
-#check installed version of rclonex to determine if update is necessary
 installed_version=$(rclonex version 2>/dev/null | head -n 1 | awk '{print $NF}')
 if [ "$installed_version" = "$target_tag" ]; then
     printf "\nThe latest %sversion of rclonex %s is already installed.\n\n" "$install_beta" "$installed_version"
     exit 3
 fi
 
-#detect the platform
 if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ] && command -v pkg >/dev/null 2>&1; then
     is_termux=1
     OS='termux'
@@ -166,7 +157,6 @@ if [ "$OS" = 'darwin' ] && [ "$OS_type" = '386' ]; then
     exit 2
 fi
 
-#download and verify
 download_base="${RCLONEX_RELEASE_BASE:-https://github.com/${REPO}/releases/download}/${target_tag}"
 archive="rclonex_${OS}_${OS_type}.tar.gz"
 echo "Downloading rclonex ${target_tag} for ${OS}/${OS_type}..."
@@ -180,7 +170,6 @@ fi
 
 tar -xzf "$archive"
 
-#install
 if [ -n "$is_termux" ]; then
     install_dest="$PREFIX/bin/rclonex"
 else
@@ -195,7 +184,6 @@ if ! install -m 0755 rclonex "$install_dest"; then
     exit 1
 fi
 
-#update version variable post install
 version=$(rclonex version 2>/dev/null | head -n 1) || true
 
 printf "\n%s has successfully installed.\n" "${version:-rclonex $target_tag}"

@@ -32,39 +32,24 @@ var (
 	errPasswordUnsupported = errors.New("--archive-password is only supported for RAR and 7z archives")
 )
 
+const defaultWindowSize = 16 << 20
+
+// ExtractOptions configures an ArchiveExtract call.
+type ExtractOptions struct {
+	Password   string
+	WindowSize int64
+}
+
+// DefaultExtractOptions returns the options used when none are supplied.
+func DefaultExtractOptions() ExtractOptions {
+	return ExtractOptions{WindowSize: defaultWindowSize}
+}
+
 func init() {
 	flagSet := Command.Flags()
 	flags.StringVarP(flagSet, &archivePassword, "archive-password", "", "", "Password for encrypted RAR and 7z archives", "")
 	flags.Int64VarP(flagSet, &archiveWindowSize, "archive-window-size", "", defaultWindowSize, "Sliding window cache size in bytes for random-access archives (ZIP, 7z, ISO9660); 0 disables caching", "")
 	archive.Command.AddCommand(Command)
-}
-
-// extractOptions carries the archive extraction command options to
-// ArchiveExtract. It is stored in the context, mirroring how the filter
-// config travels.
-type extractOptions struct {
-	password   string
-	windowSize int64
-}
-
-const defaultWindowSize = 16 << 20
-
-type extractOptionsKey struct{}
-
-// withExtractOptions returns a context with the extract options set.
-func withExtractOptions(ctx context.Context, o extractOptions) context.Context {
-	return context.WithValue(ctx, extractOptionsKey{}, o)
-}
-
-// extractOptionsFrom extracts the options from the context, or returns the
-// defaults if the context doesn't carry any - e.g. when ArchiveExtract is
-// called directly.
-func extractOptionsFrom(ctx context.Context) extractOptions {
-	o, ok := ctx.Value(extractOptionsKey{}).(extractOptions)
-	if !ok {
-		o.windowSize = defaultWindowSize
-	}
-	return o
 }
 
 // Command - extract
@@ -108,27 +93,15 @@ Formats which need random access (ZIP, 7z and ISO9660 images) are read
 through a sliding window cache of ranged reads; formats which are single
 pass (tar, tar.gz ...) are read sequentially. Remotes which do not
 support range reads make ZIP, 7z and ISO9660 archives fail with an
-explicit error rather than being accessed in some other way. ISO9660
-images with Rock Ridge or Joliet extensions are supported, including
-their long filenames.
-
-Filters can be used to only extract certain files:
-
-|||
-$ rclonex archive extract archive.zip partial --include "bye.*"
-$ rclonex tree partial
-/
-└── dir
-    └── bye.txt
-|||
+explicit error rather than silently extracting corrupted files.
 
 RAR and 7z archives can be encrypted - use --archive-password to set
-the password.
+the password. The password is not stored in the config file.
 
 Multi-volume RAR and 7z archives (and encrypted multi-volume sets with
---archive-password) are supported - the volumes are streamed from the
-remote in order, nothing is staged locally. Spanned/multi-disk ZIPs and
-multi-part TAR archives are not supported.
+a password) are supported: the volumes are streamed from the remote in order,
+nothing is staged locally. Spanned/multi-disk ZIPs and multi-part TAR archives
+are not supported.
 
 RAR4 archives are decoded by the built-in decoder first. Builds made with
 CGO enabled and the |unarr| build tag retry a RAR4 archive with the bundled
@@ -172,31 +145,66 @@ different set of archive formats to the archive commands.
 	RunE: func(command *cobra.Command, args []string) error {
 		cmd.CheckArgs(2, 2, command, args)
 
-		opts := extractOptions{
-			password:   archivePassword,
-			windowSize: archiveWindowSize,
+		opts := ExtractOptions{
+			Password:   archivePassword,
+			WindowSize: archiveWindowSize,
 		}
 
 		src, srcFile := cmd.NewFsFile(args[0])
 		dst, dstFile := cmd.NewFsFile(args[1])
 
 		cmd.Run(false, false, command, func() error {
-			return ArchiveExtract(withExtractOptions(context.Background(), opts), dst, dstFile, src, srcFile)
+			return ArchiveExtract(context.Background(), dst, dstFile, src, srcFile, opts)
 		})
 		return nil
 	},
 }
 
-// ArchiveExtract extracts files from (src, srcFile) to (dst, dstDir)
-func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, srcFile string) error {
+func withArchiveStream(ctx context.Context, srcObj fs.Object, tr *accounting.Transfer, options []fs.OpenOption, fn func(in accounting.AccountReadAtSeeker) error) error {
+	in0, err := operations.Open(ctx, srcObj, options...)
+	if err != nil {
+		return fmt.Errorf("failed to open file %s: %w", srcObj.Remote(), err)
+	}
+	defer func() {
+		_ = in0.Close()
+	}()
+	acc := tr.Account(ctx, in0)
+	in, err := acc.WithReadAtSeeker()
+	if err != nil {
+		return err
+	}
+	return fn(in)
+}
+
+func promoteStaged(ctx context.Context, dst fs.Fs, stagingDir, dstDir string) error {
+	entries, err := dst.List(ctx, stagingDir)
+	if err != nil {
+		return fmt.Errorf("failed to list staged files: %w", err)
+	}
+	for _, obj := range entries {
+		remote := strings.TrimPrefix(obj.Remote(), stagingDir+"/")
+		if dstDir != "" {
+			remote = path.Join(dstDir, remote)
+		}
+		object, ok := obj.(fs.Object)
+		if !ok {
+			continue
+		}
+		if _, err := operations.Move(ctx, dst, nil, remote, object); err != nil {
+			return fmt.Errorf("failed to promote %q: %w", remote, err)
+		}
+	}
+	return operations.Purge(ctx, dst, stagingDir)
+}
+
+// ArchiveExtract extracts files from (src, srcFile) to (dst, dstDir) using opts.
+func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, srcFile string, opts ExtractOptions) error {
 	var srcObj fs.Object
 	var filesExtracted = 0
 	var err error
 
 	fi := filter.GetConfig(ctx)
 	ci := fs.GetConfig(ctx)
-	opts := extractOptionsFrom(ctx)
-	// get source object
 	srcObj, err = src.NewObject(ctx, srcFile)
 	fs.Debugf(nil, "srcFile: %q, src: %v", srcFile, src)
 	if errors.Is(err, fs.ErrorIsDir) {
@@ -207,240 +215,159 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 		return fmt.Errorf("unable to access source: %w", err)
 	}
 	fs.Debugf(nil, "Source archive file: %s/%s", src.Root(), srcFile)
-	// Create destination directory
 	err = dst.Mkdir(ctx, dstDir)
 	if err != nil {
 		return fmt.Errorf("unable to access destination: %w", err)
 	}
 
 	fs.Debugf(dst, "Destination for extracted files: %q", dstDir)
-	// start accounting
 	tr := accounting.Stats(ctx).NewTransfer(srcObj, nil)
 	defer tr.Done(ctx, err)
-	// open source
 	var options []fs.OpenOption
 	for _, option := range fs.GetConfig(ctx).DownloadHeaders {
 		options = append(options, option)
 	}
-	in0, err := operations.Open(ctx, srcObj, options...)
-	if err != nil {
-		return fmt.Errorf("failed to open file %s: %w", srcFile, err)
-	}
-	defer func() {
-		_ = in0.Close()
-	}()
-	// account and buffer the transfer
-	// in = tr.Account(ctx, in).WithBuffer()
-	acc := tr.Account(ctx, in0)
-	in, err := acc.WithReadAtSeeker()
-	if err != nil {
-		return err
-	}
-	// RAR4 and RAR5 share one archives.Format, but only RAR4 can use the
-	// unarr fallback. Check the signature while the probing stream is open.
-	rar4 := isRAR4(in)
 
-	// handleEntry extracts one entry from the archive. It is shared by
-	// the archive-format extraction path and the ISO9660 path. open opens
-	// the entry for reading; it must not be nil for regular files.
-	var handleEntry entryHandler = func(nameInArchive string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error {
-		remote, err := destPath(nameInArchive, dstDir)
-		if err != nil {
-			return err
-		}
-		// Skip the archive root entry ("./") which has no name of its own.
-		if remote == "" {
-			return nil
-		}
-		// check if file should be extracted
-		if !fi.Include(remote, size, modTime, fs.Metadata{}) {
-			return nil
-		}
-		// process directory
-		if isDir {
-			// directory
-			fs.Debugf(nil, "mkdir %s", remote)
-			// leave if --dry-run set
-			if ci.DryRun {
-				return nil
-			}
-			// create the directory
-			return operations.Mkdir(ctx, dst, remote)
-		}
-		// process file
-		fs.Debugf(nil, "Extract %s", remote)
-		// leave if --dry-run set
-		if ci.DryRun {
-			filesExtracted++
-			return nil
-		}
-		// open file
-		fin, err := open()
-		if err != nil {
-			return err
-		}
-		counter := &countingReadCloser{ReadCloser: fin}
-		// extract the file to destination; Rcat creates its own per-file
-		// transfer for the upload
-		obj, err := operations.Rcat(ctx, dst, remote, counter, modTime, nil)
-		if err == nil && size >= 0 && counter.n != size {
-			// The upload succeeded but the archive didn't contain as many
-			// bytes as it claims for the entry - don't keep the partial file.
-			if removeErr := obj.Remove(ctx); removeErr != nil {
-				fs.Debugf(nil, "Failed to remove incomplete %q: %v", remote, removeErr)
-			}
-			err = fmt.Errorf("archive entry %q: extracted %d bytes, expected %d (archive may be corrupt)", nameInArchive, counter.n, size)
-		}
-		if err == nil {
-			filesExtracted++
-		}
-		return err
-	}
-	// ISO9660 images are not recognised by the archives library, so
-	// detect them by the "CD001" standard identifier instead. Like ZIP
-	// and 7z they are read through a windowed reader over ranged opens.
-	if probeISO(in, srcObj.Size()) {
-		if opts.password != "" {
-			return errPasswordUnsupported
-		}
-		// The probing stream is not used by the ISO path - release it
-		// before the (potentially long) extraction
-		_ = in0.Close()
-		fs.Debugf(nil, "Extract %s/%s, format iso to %s", src.Root(), srcFile, dst.Root())
-		tr.Reset(ctx)
-		source, err := newWindowedReader(ctx, srcObj, opts.windowSize, tr, options...)
-		if err != nil {
-			return err
-		}
-		err = extractISO(ctx, source, srcObj.Size(), handleEntry)
-		fs.Infof(nil, "Total files extracted %d", filesExtracted)
-		return err
-	}
-	// identify format
-	format, buffered, err := archives.Identify(ctx, "", in)
-	if err != nil {
-		return fmt.Errorf("failed to open check file type: %w", err)
-	}
-	fs.Debugf(nil, "Extract %s/%s, format %s to %s", src.Root(), srcFile, strings.TrimPrefix(format.Extension(), "."), dst.Root())
-
-	// RAR opens its volumes by name from the remote through a small io/fs
-	// adapter - the volumes are streamed from the remote, never staged
-	// locally. Set Name and FS before the options are applied so they are
-	// carried through onto the format used for extraction.
-	if r, ok := format.(archives.Rar); ok {
-		tr.Reset(ctx)
-		r.Name = srcFile
-		r.FS = remoteFS{ctx: ctx, f: src, acc: tr}
-		format = r
-	}
-
-	// apply command options (password) to the format
-	format, err = applyOptions(format, opts)
-	if err != nil {
-		return err
-	}
-
-	// check if extract is supported by format
-	ex, isExtract := format.(archives.Extraction)
-	if !isExtract {
-		return fmt.Errorf("extraction for %s not supported", strings.TrimPrefix(format.Extension(), "."))
-	}
-
-	// Random access formats (ZIP and 7z) are read through a windowed
-	// reader over ranged opens instead of the sequentially buffered
-	// stream used to identify the format - re-opening the whole archive
-	// per ReadAt would be far too slow. The buffered stream has served
-	// its purpose; drop it so the windowed fetches can take over the
-	// accounting for the archive transfer.
-	var source io.Reader = buffered
-	switch format.(type) {
-	case archives.Zip:
-		tr.Reset(ctx)
-		source, err = newWindowedReader(ctx, srcObj, opts.windowSize, tr, options...)
-		if err != nil {
-			return err
-		}
-		// The probing stream is not used once the windowed reader takes over
-		_ = in0.Close()
-	case archives.SevenZip:
-		tr.Reset(ctx)
-		if strings.HasSuffix(strings.ToLower(srcFile), ".001") {
-			volumes, totalSize, err := collectSevenZipVolumes(ctx, src, srcFile)
-			if err != nil {
-				return fmt.Errorf("failed to collect the 7z volume set for %q: %w", srcFile, err)
-			}
-			// The volume readers account the fetched bytes; the outer
-			// reader must not account them a second time.
-			source = newWindowedReaderFromFetch(ctx, totalSize, opts.windowSize, nil, concatFetch(ctx, volumes, tr, options...))
-		} else {
-			source, err = newWindowedReader(ctx, srcObj, opts.windowSize, tr, options...)
+	newEntryHandler := func(dir string) entryHandler {
+		return func(nameInArchive string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error {
+			remote, err := destPath(nameInArchive, dir)
 			if err != nil {
 				return err
 			}
-		}
-		// The probing stream is not used once the windowed reader takes over
-		_ = in0.Close()
-	case archives.Rar:
-		// The stream is not used; the format reads its volumes from the
-		// remote via the FS set above.
-		source = nil
-		_ = in0.Close()
-	}
-
-	// extract files
-	err = ex.Extract(ctx, source, func(ctx context.Context, f archives.FileInfo) error {
-		return handleEntry(f.NameInArchive, f.Size(), f.ModTime(), f.IsDir(), func() (io.ReadCloser, error) {
-			return f.Open()
-		})
-	})
-
-	// The built-in RAR decoder is authoritative. Only a classified decoder
-	// failure on a RAR4 archive is retried with unarr; I/O, permission and
-	// cancellation failures must never trigger a second extraction.
-	if rar4 && isRecoverableRAR4DecodeError(err) {
-		primaryErr := err
-		fs.Logf(nil, "RAR decoder failed (%v), trying unarr RAR4 fallback", err)
-		counted := filesExtracted
-		var uploaded []string
-		fallbackEntry := entryHandler(func(nameInArchive string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error {
-			remote, destErr := destPath(nameInArchive, dstDir)
-			existed := false
-			if destErr == nil {
-				_, getErr := dst.NewObject(ctx, remote)
-				existed = getErr == nil
+			if remote == "" {
+				return nil
 			}
-			err := handleEntry(nameInArchive, size, modTime, isDir, open)
-			if err == nil && !isDir && !ci.DryRun && !existed && destErr == nil {
-				uploaded = append(uploaded, remote)
+			if !fi.Include(remote, size, modTime, fs.Metadata{}) {
+				return nil
+			}
+			if isDir {
+				fs.Debugf(nil, "mkdir %s", remote)
+				if ci.DryRun {
+					return nil
+				}
+				return operations.Mkdir(ctx, dst, remote)
+			}
+			fs.Debugf(nil, "Extract %s", remote)
+			if ci.DryRun {
+				filesExtracted++
+				return nil
+			}
+			fin, err := open()
+			if err != nil {
+				return err
+			}
+			counter := &countingReadCloser{ReadCloser: fin}
+			// Rcat creates its own per-file transfer for the upload
+			obj, err := operations.Rcat(ctx, dst, remote, counter, modTime, nil)
+			if err == nil && size >= 0 && counter.n != size {
+				if removeErr := obj.Remove(ctx); removeErr != nil {
+					fs.Debugf(nil, "Failed to remove incomplete %q: %v", remote, removeErr)
+				}
+				err = fmt.Errorf("archive entry %q: extracted %d bytes, expected %d (archive may be corrupt)", nameInArchive, counter.n, size)
+			}
+			if err == nil {
+				filesExtracted++
 			}
 			return err
-		})
-		tr.Reset(ctx)
-		filesExtracted = counted
-		fallbackErr := extractRAR4WithUnarr(ctx, srcObj, opts.windowSize, tr, fallbackEntry)
-		if fallbackErr == nil {
-			fs.Logf(nil, "unarr RAR4 fallback succeeded")
-			err = nil
-		} else {
-			// Roll back files uploaded by the fallback attempt. Entries
-			// from the primary attempt are deliberately left alone.
-			for _, remote := range uploaded {
-				obj, getErr := dst.NewObject(ctx, remote)
-				if getErr == nil {
-					if removeErr := obj.Remove(ctx); removeErr != nil {
-						fs.Debugf(nil, "Failed to remove fallback file %q: %v", remote, removeErr)
-					}
+		}
+	}
+	handleEntry := newEntryHandler(dstDir)
+
+	err = withArchiveStream(ctx, srcObj, tr, options, func(in accounting.AccountReadAtSeeker) error {
+		if probeISO(in, srcObj.Size()) {
+			if opts.Password != "" {
+				return errPasswordUnsupported
+			}
+			fs.Debugf(nil, "Extract %s/%s, format iso to %s", src.Root(), srcFile, dst.Root())
+			tr.Reset(ctx)
+			source, err := newWindowedReader(ctx, srcObj, opts.WindowSize, tr, options...)
+			if err != nil {
+				return err
+			}
+			err = extractISO(ctx, source, srcObj.Size(), handleEntry)
+			fs.Infof(nil, "Total files extracted %d", filesExtracted)
+			return err
+		}
+		format, buffered, err := archives.Identify(ctx, "", in)
+		if err != nil {
+			return fmt.Errorf("failed to open check file type: %w", err)
+		}
+		fs.Debugf(nil, "Extract %s/%s, format %s to %s", src.Root(), srcFile, strings.TrimPrefix(format.Extension(), "."), dst.Root())
+		rar4 := isRAR4(in)
+
+		if r, ok := format.(archives.Rar); ok {
+			tr.Reset(ctx)
+			r.Name = srcFile
+			r.FS = remoteFS{ctx: ctx, f: src, acc: tr}
+			format = r
+		}
+		format, err = applyOptions(format, opts)
+		if err != nil {
+			return err
+		}
+		ex, isExtract := format.(archives.Extraction)
+		if !isExtract {
+			return fmt.Errorf("extraction for %s not supported", strings.TrimPrefix(format.Extension(), "."))
+		}
+
+		var source io.Reader = buffered
+		switch format.(type) {
+		case archives.Zip:
+			tr.Reset(ctx)
+			source, err = newWindowedReader(ctx, srcObj, opts.WindowSize, tr, options...)
+			if err != nil {
+				return err
+			}
+		case archives.SevenZip:
+			tr.Reset(ctx)
+			if strings.HasSuffix(strings.ToLower(srcFile), ".001") {
+				volumes, totalSize, err := collectSevenZipVolumes(ctx, src, srcFile)
+				if err != nil {
+					return fmt.Errorf("failed to collect the 7z volume set for %q: %w", srcFile, err)
+				}
+				source = newWindowedReaderFromFetch(ctx, totalSize, opts.WindowSize, concatFetch(ctx, volumes, tr, options...))
+			} else {
+				source, err = newWindowedReader(ctx, srcObj, opts.WindowSize, tr, options...)
+				if err != nil {
+					return err
 				}
 			}
-			err = errors.Join(primaryErr, fmt.Errorf("unarr RAR4 fallback failed: %w", fallbackErr))
-			err = encryptionHint(err, opts.password)
+		case archives.Rar:
+			source = nil
 		}
-	} else {
-		err = encryptionHint(err, opts.password)
-	}
 
-	fs.Infof(nil, "Total files extracted %d", filesExtracted)
+		err = ex.Extract(ctx, source, func(ctx context.Context, f archives.FileInfo) error {
+			return handleEntry(f.NameInArchive, f.Size(), f.ModTime(), f.IsDir(), func() (io.ReadCloser, error) {
+				return f.Open()
+			})
+		})
 
+		if rar4 && isRecoverableRAR4DecodeError(err) {
+			primaryErr := err
+			fs.Logf(nil, "RAR decoder failed (%v), trying unarr RAR4 fallback", err)
+			counted := filesExtracted
+			stagingDir := path.Join(dstDir, fmt.Sprintf(".rclonex-rar4-fallback-%d", time.Now().UnixNano()))
+			tr.Reset(ctx)
+			filesExtracted = counted
+			fallbackErr := extractRAR4WithUnarr(ctx, srcObj, opts.WindowSize, tr, newEntryHandler(stagingDir))
+			if fallbackErr == nil {
+				fallbackErr = promoteStaged(ctx, dst, stagingDir, dstDir)
+			}
+			if fallbackErr == nil {
+				fs.Logf(nil, "unarr RAR4 fallback succeeded")
+				err = nil
+			} else {
+				_ = operations.Purge(ctx, dst, stagingDir)
+				err = errors.Join(primaryErr, fmt.Errorf("unarr RAR4 fallback failed: %w", fallbackErr))
+				err = encryptionHint(err, opts.Password)
+			}
+		} else {
+			err = encryptionHint(err, opts.Password)
+		}
+
+		fs.Infof(nil, "Total files extracted %d", filesExtracted)
+		return err
+	})
 	return err
 }
 
@@ -466,7 +393,7 @@ func encryptionHint(err error, password string) error {
 // applied to the inner archive. The password is only meaningful to RAR and
 // 7z archives, so an error is returned for other formats rather than
 // silently ignoring it.
-func applyOptions(format archives.Format, opts extractOptions) (archives.Format, error) {
+func applyOptions(format archives.Format, opts ExtractOptions) (archives.Format, error) {
 	if ca, ok := format.(archives.CompressedArchive); ok {
 		updated, err := applyExtractionOptions(ca.Extraction, opts)
 		if err != nil {
@@ -477,7 +404,7 @@ func applyOptions(format archives.Format, opts extractOptions) (archives.Format,
 	}
 	ex, ok := format.(archives.Extraction)
 	if !ok {
-		if opts.password != "" {
+		if opts.Password != "" {
 			return nil, errPasswordUnsupported
 		}
 		return format, nil
@@ -487,30 +414,30 @@ func applyOptions(format archives.Format, opts extractOptions) (archives.Format,
 
 // applyExtractionOptions applies the password to a single extraction
 // format. The password is rejected for every format other than RAR and 7z.
-func applyExtractionOptions(ex archives.Extraction, opts extractOptions) (archives.Extraction, error) {
+func applyExtractionOptions(ex archives.Extraction, opts ExtractOptions) (archives.Extraction, error) {
 	switch f := ex.(type) {
 	case archives.Zip:
-		if opts.password != "" {
+		if opts.Password != "" {
 			return nil, errPasswordUnsupported
 		}
 		return f, nil
 	case archives.SevenZip:
-		if opts.password != "" {
-			f.Password = opts.password
+		if opts.Password != "" {
+			f.Password = opts.Password
 		}
 		return f, nil
 	case archives.Rar:
-		if opts.password != "" {
-			f.Password = opts.password
+		if opts.Password != "" {
+			f.Password = opts.Password
 		}
 		return f, nil
 	case archives.Tar:
-		if opts.password != "" {
+		if opts.Password != "" {
 			return nil, errPasswordUnsupported
 		}
 		return f, nil
 	default:
-		if opts.password != "" {
+		if opts.Password != "" {
 			return nil, errPasswordUnsupported
 		}
 		return ex, nil

@@ -27,7 +27,7 @@ func memoryFetch(data []byte) func(context.Context, int64, int64) (io.ReadCloser
 
 func TestRAR4StreamAdapter(t *testing.T) {
 	data := []byte("0123456789abcdef")
-	w := newWindowedReaderFromFetch(context.Background(), int64(len(data)), 8, nil, memoryFetch(data))
+	w := newWindowedReaderFromFetch(context.Background(), int64(len(data)), 8, memoryFetch(data))
 	s := &rar4Stream{r: w}
 	p := make([]byte, 5)
 	if n, err := s.read(p); err != nil || n != 5 || string(p) != "01234" {
@@ -44,7 +44,7 @@ func TestRAR4StreamAdapter(t *testing.T) {
 	}
 
 	wantErr := errors.New("remote unavailable")
-	w = newWindowedReaderFromFetch(context.Background(), int64(len(data)), 8, nil,
+	w = newWindowedReaderFromFetch(context.Background(), int64(len(data)), 8,
 		func(ctx context.Context, off, want int64) (io.ReadCloser, error) {
 			return nil, wantErr
 		})
@@ -79,7 +79,7 @@ func TestRAR4FallbackFromFetch(t *testing.T) {
 		names = append(names, name)
 		return nil
 	})
-	if err := extractRAR4FromFetch(context.Background(), int64(len(data)), 16, nil, memoryFetch(data), handler); err != nil {
+	if err := (rar4Fetch{size: int64(len(data)), windowSize: 16, fetch: memoryFetch(data)}).extract(context.Background(), handler); err != nil {
 		t.Fatal(err)
 	}
 	if len(names) == 0 {
@@ -97,7 +97,7 @@ func TestRAR4FallbackCancellation(t *testing.T) {
 	handler := entryHandler(func(name string, size int64, modTime time.Time, isDir bool, open func() (io.ReadCloser, error)) error {
 		return nil
 	})
-	err = extractRAR4FromFetch(ctx, int64(len(data)), 16, nil, memoryFetch(data), handler)
+	err = rar4Fetch{size: int64(len(data)), windowSize: 16, fetch: memoryFetch(data)}.extract(ctx, handler)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected cancellation, got %v", err)
 	}

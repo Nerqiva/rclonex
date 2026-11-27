@@ -110,6 +110,8 @@ Make the first line of your commit message a summary of the change that a user (
 
 Comments describe the code as it is now, for a future reader who has no knowledge of the change that introduced it.
 
+For feature development in this fork, **do not add explanatory comments**. Add only the godoc comments required below and comments that state an external rule or constraint we cannot change (with a source). Do not add section labels, step labels, helper descriptions, design justifications, or restatements of what the next line does.
+
 Every exported type, function, field, and constant has a **godoc comment** that starts with its name and is phrased as a present-tense statement of what it is or does (`// Mkdir makes the directory (container, bucket)`)
 
 **Document the contract** callers need - preconditions, what's returned, which sentinel errors are returned and when, and any "shouldn't return an error if it already exists" style caveats - rather than the implementation.

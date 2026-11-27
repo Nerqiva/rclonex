@@ -20,8 +20,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// uploadFixtureVolumes uploads the fixture volumes to src, optionally under
-// prefix, e.g. "sub/archive".
 func uploadFixtureVolumes(t *testing.T, ctx context.Context, src fs.Fs, prefix string, names ...string) {
 	t.Helper()
 	for _, name := range names {
@@ -36,8 +34,6 @@ func uploadFixtureVolumes(t *testing.T, ctx context.Context, src fs.Fs, prefix s
 	}
 }
 
-// assertFixtureContents checks the files extracted from the multi-volume
-// fixtures - hello.txt, payload.bin and sub/dir/nested.txt.
 func assertFixtureContents(t *testing.T, ctx context.Context, dst fs.Fs) {
 	t.Helper()
 	for name, data := range map[string][]byte{
@@ -56,8 +52,6 @@ func assertFixtureContents(t *testing.T, ctx context.Context, dst fs.Fs) {
 	}
 }
 
-// eofChunkFs wraps a memory fs so every Open reports the final bytes with
-// io.EOF, like an HTTP response body
 type eofChunkFs struct{ fs.Fs }
 
 func (f *eofChunkFs) NewObject(ctx context.Context, remote string) (fs.Object, error) {
@@ -84,8 +78,6 @@ func (o *eofChunkObject) Open(ctx context.Context, options ...fs.OpenOption) (io
 	return &eofChunkReader{data: data}, nil
 }
 
-// eofChunkReader returns io.EOF alongside the final data chunk, not on the
-// following zero-length read
 type eofChunkReader struct {
 	data []byte
 	done bool
@@ -113,7 +105,7 @@ func TestExtractRarMultiVolumeChunkedEOF(t *testing.T) {
 	dst := memoryFs(t, "dst")
 	uploadFixtureVolumes(t, ctx, base, "", "mv-multivolume.part1.rar", "mv-multivolume.part2.rar", "mv-multivolume.part3.rar")
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-multivolume.part1.rar"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-multivolume.part1.rar", DefaultExtractOptions()))
 	assertFixtureContents(t, ctx, dst)
 }
 
@@ -123,7 +115,7 @@ func TestExtractRarMultiVolume(t *testing.T) {
 	dst := memoryFs(t, "dst")
 	uploadFixtureVolumes(t, ctx, src, "", "mv-multivolume.part1.rar", "mv-multivolume.part2.rar", "mv-multivolume.part3.rar")
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-multivolume.part1.rar"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-multivolume.part1.rar", DefaultExtractOptions()))
 	assertFixtureContents(t, ctx, dst)
 }
 
@@ -133,7 +125,7 @@ func TestExtractRarMultiVolumePathPrefix(t *testing.T) {
 	dst := memoryFs(t, "dst")
 	uploadFixtureVolumes(t, ctx, src, "sub/archive", "mv-multivolume.part1.rar", "mv-multivolume.part2.rar", "mv-multivolume.part3.rar")
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "sub/archive/mv-multivolume.part1.rar"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "sub/archive/mv-multivolume.part1.rar", DefaultExtractOptions()))
 	assertFixtureContents(t, ctx, dst)
 }
 
@@ -143,7 +135,7 @@ func TestExtractRarMultiVolumeOldNaming(t *testing.T) {
 	dst := memoryFs(t, "dst")
 	uploadFixtureVolumes(t, ctx, src, "", "mv-multivolume-old.rar", "mv-multivolume-old.r00", "mv-multivolume-old.r01")
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-multivolume-old.rar"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-multivolume-old.rar", DefaultExtractOptions()))
 	assertFixtureContents(t, ctx, dst)
 }
 
@@ -151,10 +143,9 @@ func TestExtractRarMultiVolumeMissingVolume(t *testing.T) {
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
-	// part2 is missing - payload.bin spans it
 	uploadFixtureVolumes(t, ctx, src, "", "mv-multivolume.part1.rar", "mv-multivolume.part3.rar")
 
-	err := ArchiveExtract(ctx, dst, "", src, "mv-multivolume.part1.rar")
+	err := ArchiveExtract(ctx, dst, "", src, "mv-multivolume.part1.rar", DefaultExtractOptions())
 	assert.Error(t, err)
 }
 
@@ -169,12 +160,12 @@ func TestExtractRarMultiVolumePassword(t *testing.T) {
 		{"correct password", "rclonex", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := withExtractOptions(context.Background(), extractOptions{password: tc.password})
+			ctx := context.Background()
 			src := memoryFs(t, "src")
 			dst := memoryFs(t, "dst")
 			uploadFixtureVolumes(t, ctx, src, "", "mv-encrypted.part1.rar", "mv-encrypted.part2.rar", "mv-encrypted.part3.rar")
 
-			err := ArchiveExtract(ctx, dst, "", src, "mv-encrypted.part1.rar")
+			err := ArchiveExtract(ctx, dst, "", src, "mv-encrypted.part1.rar", ExtractOptions{Password: tc.password})
 			if tc.wantErr {
 				assert.Error(t, err)
 				return
@@ -191,7 +182,7 @@ func TestExtractRarSingleVolumeViaRemoteFS(t *testing.T) {
 	dst := memoryFs(t, "dst")
 	uploadFixtureVolumes(t, ctx, src, "", "mv-single.rar")
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-single.rar"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-single.rar", DefaultExtractOptions()))
 	assertFixtureContents(t, ctx, dst)
 }
 
@@ -201,7 +192,7 @@ func TestExtractSevenZipMultiVolume(t *testing.T) {
 	dst := memoryFs(t, "dst")
 	uploadFixtureVolumes(t, ctx, src, "", "mv-multivolume.7z.001", "mv-multivolume.7z.002", "mv-multivolume.7z.003")
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-multivolume.7z.001"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "mv-multivolume.7z.001", DefaultExtractOptions()))
 	assertFixtureContents(t, ctx, dst)
 }
 
@@ -216,12 +207,12 @@ func TestExtractSevenZipMultiVolumePassword(t *testing.T) {
 		{"correct password", "rclonex", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := withExtractOptions(context.Background(), extractOptions{password: tc.password})
+			ctx := context.Background()
 			src := memoryFs(t, "src")
 			dst := memoryFs(t, "dst")
 			uploadFixtureVolumes(t, ctx, src, "", "mv-encrypted.7z.001", "mv-encrypted.7z.002", "mv-encrypted.7z.003")
 
-			err := ArchiveExtract(ctx, dst, "", src, "mv-encrypted.7z.001")
+			err := ArchiveExtract(ctx, dst, "", src, "mv-encrypted.7z.001", ExtractOptions{Password: tc.password})
 			if tc.wantErr {
 				assert.Error(t, err)
 				return
@@ -236,15 +227,12 @@ func TestExtractSevenZipMultiVolumeMissingVolume(t *testing.T) {
 	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
-	// .002 is missing - the volume collection stops at .001 and the archive
-	// header at the true end is unreadable
 	uploadFixtureVolumes(t, ctx, src, "", "mv-multivolume.7z.001", "mv-multivolume.7z.003")
 
-	err := ArchiveExtract(ctx, dst, "", src, "mv-multivolume.7z.001")
+	err := ArchiveExtract(ctx, dst, "", src, "mv-multivolume.7z.001", DefaultExtractOptions())
 	assert.Error(t, err)
 }
 
-// shortErrorReader yields its data then fails with err on the next read.
 type shortErrorReader struct {
 	data []byte
 	err  error
@@ -266,9 +254,6 @@ func (r *shortErrorReader) Read(p []byte) (int, error) {
 
 func (r *shortErrorReader) Close() error { return nil }
 
-// shortVolumeFs serves one named volume with fewer bytes than its object
-// reports, ending with a clean io.EOF. This models a remote which returns a
-// truncated response body for a ranged or streamed object.
 type shortVolumeFs struct {
 	fs.Fs
 	shortName string
@@ -317,7 +302,7 @@ func TestExtractRarMultiVolumeShortVolume(t *testing.T) {
 	dst := memoryFs(t, "dst")
 	uploadFixtureVolumes(t, ctx, base, "", "mv-multivolume.part1.rar", "mv-multivolume.part2.rar", "mv-multivolume.part3.rar")
 
-	err := ArchiveExtract(ctx, dst, "", src, "mv-multivolume.part1.rar")
+	err := ArchiveExtract(ctx, dst, "", src, "mv-multivolume.part1.rar", DefaultExtractOptions())
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mv-multivolume.part2.rar")
@@ -333,7 +318,7 @@ func TestConcatVolumesReaderPropagatesReadError(t *testing.T) {
 	}
 	state := &concatState{
 		volumes: []sevenZipVolume{{size: size, base: 0}},
-		readers: []*windowedReader{newWindowedReaderFromFetch(ctx, size, 0, nil, fetch)},
+		readers: []*windowedReader{newWindowedReaderFromFetch(ctx, size, 0, fetch)},
 	}
 	r := &concatVolumesReader{state: state, pos: 0, end: size}
 

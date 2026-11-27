@@ -154,8 +154,6 @@ func makeTarGz(t *testing.T, entries []testArchiveEntry) []byte {
 	return buf.Bytes()
 }
 
-// checkExtracted compares the extracted files in dst against the expected
-// entries and returns the number of regular files found.
 func checkExtracted(t *testing.T, ctx context.Context, dst fs.Fs, entries []testArchiveEntry) {
 	t.Helper()
 	found := 0
@@ -187,12 +185,12 @@ func TestArchiveExtractZip(t *testing.T) {
 	_, err := operations.Rcat(ctx, src, "archive.zip", io.NopCloser(bytes.NewReader(makeZip(t, entries))), time.Unix(1735689600, 0).UTC(), nil)
 	require.NoError(t, err)
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "archive.zip"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "archive.zip", DefaultExtractOptions()))
 	checkExtracted(t, ctx, dst, entries)
 }
 
 func TestArchiveExtractZipWindowSizeZero(t *testing.T) {
-	ctx := withExtractOptions(context.Background(), extractOptions{windowSize: 0})
+	ctx := context.Background()
 	src := memoryFs(t, "src")
 	dst := memoryFs(t, "dst")
 	entries := testArchiveEntries()
@@ -200,7 +198,7 @@ func TestArchiveExtractZipWindowSizeZero(t *testing.T) {
 	_, err := operations.Rcat(ctx, src, "archive.zip", io.NopCloser(bytes.NewReader(makeZip(t, entries))), time.Unix(1735689600, 0).UTC(), nil)
 	require.NoError(t, err)
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "archive.zip"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "archive.zip", ExtractOptions{WindowSize: 0}))
 	checkExtracted(t, ctx, dst, entries)
 }
 
@@ -213,7 +211,7 @@ func TestArchiveExtractTarGz(t *testing.T) {
 	_, err := operations.Rcat(ctx, src, "archive.tar.gz", io.NopCloser(bytes.NewReader(makeTarGz(t, entries))), time.Unix(1735689600, 0).UTC(), nil)
 	require.NoError(t, err)
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "archive.tar.gz"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "archive.tar.gz", DefaultExtractOptions()))
 	checkExtracted(t, ctx, dst, entries)
 }
 
@@ -224,16 +222,13 @@ func TestArchiveExtractCorruptZip(t *testing.T) {
 	entries := testArchiveEntries()
 	data := makeZip(t, entries)
 
-	// Truncate the archive - the central directory is missing
 	_, err := operations.Rcat(ctx, src, "corrupt.zip", io.NopCloser(bytes.NewReader(data[:len(data)/2])), time.Unix(1735689600, 0).UTC(), nil)
 	require.NoError(t, err)
 
-	err = ArchiveExtract(ctx, dst, "", src, "corrupt.zip")
+	err = ArchiveExtract(ctx, dst, "", src, "corrupt.zip", DefaultExtractOptions())
 	assert.Error(t, err)
 }
 
-// rangeIgnoringFs is an fs.Fs whose objects ignore RangeOption and return
-// the whole file, like a remote which doesn't support range reads.
 type rangeIgnoringFs struct {
 	data []byte
 }
@@ -267,7 +262,7 @@ func TestArchiveExtractRangeNotSupported(t *testing.T) {
 	src := &rangeIgnoringFs{data: makeZip(t, testArchiveEntries())}
 	dst := memoryFs(t, "dst")
 
-	err := ArchiveExtract(ctx, dst, "", src, "archive.zip")
+	err := ArchiveExtract(ctx, dst, "", src, "archive.zip", DefaultExtractOptions())
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "range")
 }
@@ -284,7 +279,7 @@ func TestArchiveExtractPassword(t *testing.T) {
 			{"correct password", "rclonex", false},
 		} {
 			t.Run(name+"/"+tc.name, func(t *testing.T) {
-				ctx := withExtractOptions(context.Background(), extractOptions{password: tc.password})
+				ctx := context.Background()
 				src := memoryFs(t, "src")
 				dst := memoryFs(t, "dst")
 				archiveData, err := os.ReadFile("testdata/" + name)
@@ -292,12 +287,10 @@ func TestArchiveExtractPassword(t *testing.T) {
 				_, err = operations.Rcat(ctx, src, name, io.NopCloser(bytes.NewReader(archiveData)), time.Unix(1735689600, 0).UTC(), nil)
 				require.NoError(t, err)
 
-				err = ArchiveExtract(ctx, dst, "", src, name)
+				err = ArchiveExtract(ctx, dst, "", src, name, ExtractOptions{Password: tc.password})
 				if tc.wantErr {
 					assert.Error(t, err)
 					if strings.HasSuffix(name, ".7z") {
-						// the extraction library reports a missing or wrong
-						// password as a low-level error - check the hint is there
 						assert.Contains(t, err.Error(), "--archive-password")
 					}
 					return
@@ -322,8 +315,8 @@ func TestArchiveExtractPassword(t *testing.T) {
 }
 
 func TestApplyOptions(t *testing.T) {
-	opts := func(password string) extractOptions {
-		return extractOptions{password: password}
+	opts := func(password string) ExtractOptions {
+		return ExtractOptions{Password: password}
 	}
 
 	t.Run("rar with password", func(t *testing.T) {

@@ -1,6 +1,4 @@
 ---
-# rclonex CI: tests, regression, cross-platform builds, releases.
-# Kept separate from the upstream "build" workflow so upstream rebases stay mechanical.
 
 name: "RcloneX: Test, Build & Release"
 
@@ -102,7 +100,6 @@ jobs:
           fi
       - name: Package
         run: |
-          # Unversioned asset names so releases/latest/download/<name> works for scripts
           cd stage
           if [ "${{ matrix.goos }}" = windows ]; then
             apt-get update -qq && apt-get install -y -qq zip >/dev/null
@@ -141,29 +138,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Tag pushes release the tag name; pushes to main and manual runs
-          # release the version in the VERSION file.
           if [[ "$GITHUB_REF" == refs/tags/* ]]; then
             TAG="$GITHUB_REF_NAME"
           else
             TAG="$(cat VERSION)"
           fi
-          # Pre-release only for suffixed versions (e.g. -alpha.1) so plain
-          # CalVer versions become full releases and releases/latest resolves.
           prerelease=
           if [[ "$TAG" == *-* ]]; then prerelease=--prerelease; fi
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-              # Idempotent re-runs (e.g. after a tag move): drop the old
-              # assets so only correctly named ones remain, then upload.
               for a in $(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name'); do
                 gh release delete-asset "$TAG" --repo "$GITHUB_REPOSITORY" "$a" --yes
               done
               gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" rclonex_* checksums.txt install.sh
             elif [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" == "true" ]]; then
-              # Rolling prerelease: recreate it on the pushed commit so the
-              # tag always points at the build it was cut from. Full releases
-              # (plain CalVer, cut from a release branch) are left untouched.
               gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag
               gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" $prerelease --title "$TAG" --notes "Automated prerelease from ${GITHUB_REF_NAME} @ $(git rev-parse --short HEAD)" rclonex_* checksums.txt install.sh
             else
@@ -172,8 +160,6 @@ jobs:
           else
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes $prerelease --title "$TAG" --target "$GITHUB_SHA" rclonex_* checksums.txt install.sh
           fi
-          # Publishing a prerelease from main also copies main into the
-          # prerelease version branch (e.g. release/v2026.11.0-alpha.5).
           if [[ "$GITHUB_REF" == refs/heads/main && -n "$prerelease" ]]; then
             git push --force origin "$GITHUB_SHA:refs/heads/release/$TAG"
           fi

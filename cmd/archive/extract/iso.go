@@ -80,13 +80,10 @@ type isoStorage struct {
 	size int64
 }
 
-// Read reads bytes from the current position in the image.
 func (s *isoStorage) Read(p []byte) (int, error) { return s.r.Read(p) }
 
-// ReadAt reads bytes at an absolute offset in the image.
 func (s *isoStorage) ReadAt(p []byte, off int64) (int, error) { return s.r.ReadAt(p, off) }
 
-// Seek sets the offset for the next Read.
 func (s *isoStorage) Seek(offset int64, whence int) (int64, error) {
 	return s.r.Seek(offset, whence)
 }
@@ -95,7 +92,6 @@ func (s *isoStorage) Seek(offset int64, whence int) (int64, error) {
 // underlying object.
 func (s *isoStorage) Close() error { return nil }
 
-// Stat returns a read-only FileInfo for the image.
 func (s *isoStorage) Stat() (iofs.FileInfo, error) { return isoStorageFileInfo{size: s.size}, nil }
 
 // Sys returns an error as there is no underlying OS file for the image.
@@ -107,29 +103,22 @@ func (s *isoStorage) Writable() (backend.WritableFile, error) { return nil, errN
 // Path returns an empty string as the image has no local path.
 func (s *isoStorage) Path() string { return "" }
 
-// isoStorageFileInfo is a read-only fs.FileInfo for the image.
 type isoStorageFileInfo struct {
 	size int64
 }
 
 var _ backend.Storage = (*isoStorage)(nil)
 
-// Name returns "" as the image has no meaningful name.
 func (i isoStorageFileInfo) Name() string { return "" }
 
-// Size returns the size of the image in bytes.
 func (i isoStorageFileInfo) Size() int64 { return i.size }
 
-// Mode returns 0o444 - the image is read only.
 func (i isoStorageFileInfo) Mode() os.FileMode { return 0o444 }
 
-// ModTime returns the zero time.
 func (i isoStorageFileInfo) ModTime() time.Time { return time.Time{} }
 
-// IsDir returns false.
 func (i isoStorageFileInfo) IsDir() bool { return false }
 
-// Sys returns nil.
 func (i isoStorageFileInfo) Sys() any { return nil }
 
 // extractISO walks the ISO9660 image read from source (an image of size
@@ -156,7 +145,6 @@ func extractISO(ctx context.Context, source *windowedReader, size int64, handle 
 		entries, err := fsys.ReadDir(dir)
 		if err != nil {
 			if dir == "." {
-				// Nothing can be extracted without the root directory
 				return fmt.Errorf("failed to read the root directory of the ISO: %w", err)
 			}
 			return fmt.Errorf("failed to read directory %q in the ISO: %w", dir, err)
@@ -166,7 +154,6 @@ func extractISO(ctx context.Context, source *windowedReader, size int64, handle 
 			if dir != "." {
 				rel = dir + "/" + entry.Name()
 			}
-			// Skip entry names that aren't safe
 			if err := sanitize.Leaf(entry.Name()); err != nil {
 				fs.Debugf(nil, "Skipping ISO entry %q which escapes the archive", rel)
 				skipped++
@@ -205,9 +192,6 @@ func extractISO(ctx context.Context, source *windowedReader, size int64, handle 
 				fs.Debugf(nil, "Skipping ISO entry %q - not a regular file", rel)
 				skipped++
 			default:
-				// Read the file's extent straight from the image.
-				// Opening through the filesystem would re-read and
-				// re-parse the parent directory on every file.
 				open := func() (io.ReadCloser, error) {
 					if st, ok := info.Sys().(*iso9660.StatT); ok {
 						if st.Location == 0 && info.Size() > 0 {

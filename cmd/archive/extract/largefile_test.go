@@ -20,7 +20,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// patternReader yields an infinite stream of byte(b) bytes.
 type patternReader struct{ b byte }
 
 func (p patternReader) Read(b []byte) (int, error) {
@@ -30,7 +29,6 @@ func (p patternReader) Read(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// cyclingPatternReader yields an infinite stream of pattern repeated.
 type cyclingPatternReader struct {
 	pattern []byte
 	pos     int
@@ -46,15 +44,11 @@ func (p *cyclingPatternReader) Read(b []byte) (int, error) {
 	return written, nil
 }
 
-// peakRSSBytes returns the process' peak resident set size, or 0 if it is
-// not measurable on this platform.
 func peakRSSBytes(t *testing.T) int64 {
 	t.Helper()
 	return maxRSSBytes()
 }
 
-// extractTarGzAndMeasure extracts srcName from src to dst, checks the
-// payload size and hash against a constant pattern, and returns peak RSS.
 func checkLargeExtraction(t *testing.T, dstDir, payloadName string, size int64, expectedMD5 [16]byte) {
 	t.Helper()
 	verify := func() {
@@ -112,7 +106,7 @@ func TestArchiveExtractLargeTarGz(t *testing.T) {
 	dst, err := fs.NewFs(ctx, dstDir)
 	require.NoError(t, err)
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "big.tar.gz"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "big.tar.gz", DefaultExtractOptions()))
 	checkLargeExtraction(t, dstDir, "payload.bin", payloadSize, expect)
 
 	if rss := peakRSSBytes(t); rss > 0 {
@@ -128,10 +122,6 @@ func TestArchiveExtractLargeTarGz(t *testing.T) {
 // archive of a 48 MiB constant payload. The committed testdata/bigmv.7z.001..004
 // fixture is tiny (the payload is highly compressible) yet still exercises
 // the full extraction path.
-//
-// Note peak RSS is a process-wide high-water mark, so - as with the other
-// large file tests - the budget must be generous; the focused regression
-// check for the window reader's memory retention is in reader_test.go.
 func TestArchiveExtractLargeSevenZipMultiVolume(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping large file test in -short mode")
@@ -151,7 +141,7 @@ func TestArchiveExtractLargeSevenZipMultiVolume(t *testing.T) {
 	require.NoError(t, err)
 	expect := [16]byte(m.Sum(nil))
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "bigmv.7z.001"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "bigmv.7z.001", DefaultExtractOptions()))
 	checkLargeExtraction(t, dstDir, "payload.bin", payloadSize, expect)
 
 	if rss := peakRSSBytes(t); rss > 0 {
@@ -204,7 +194,7 @@ func TestArchiveExtractLargeZipRandomAccess(t *testing.T) {
 	dst, err := fs.NewFs(ctx, dstDir)
 	require.NoError(t, err)
 
-	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "big.zip"))
+	require.NoError(t, ArchiveExtract(ctx, dst, "", src, "big.zip", DefaultExtractOptions()))
 	checkLargeExtraction(t, dstDir, "payload.bin", payloadSize, expect)
 
 	if rss := peakRSSBytes(t); rss > 0 {
