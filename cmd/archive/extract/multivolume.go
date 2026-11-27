@@ -10,6 +10,7 @@ import (
 	iofs "io/fs"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -191,6 +192,9 @@ func collectSevenZipVolumes(ctx context.Context, src fs.Fs, srcFile string) ([]s
 		remote := fmt.Sprintf("%s.%03d", baseName, i)
 		obj, err := src.NewObject(ctx, remote)
 		if errors.Is(err, fs.ErrorObjectNotFound) {
+			if gapErr := sevenZipVolumeGap(ctx, src, baseName, remote, i); gapErr != nil {
+				return nil, 0, gapErr
+			}
 			break
 		}
 		if err != nil {
@@ -204,6 +208,39 @@ func collectSevenZipVolumes(ctx context.Context, src fs.Fs, srcFile string) ([]s
 		total += size
 	}
 	return volumes, total, nil
+}
+
+// sevenZipVolumeGap turns a missing volume in the middle of a set into a
+// named error. Sequential probing stops at the first absent name, so a later
+// volume must be found by listing the directory before the gap can be told
+// apart from the end of the set. A failed or unsupported list leaves the
+// original end-of-set behaviour intact.
+func sevenZipVolumeGap(ctx context.Context, src fs.Fs, baseName, missing string, next int) error {
+	dir := path.Dir(baseName)
+	if dir == "." {
+		dir = ""
+	}
+	entries, err := src.List(ctx, dir)
+	if err != nil {
+		return nil
+	}
+	prefix := path.Base(baseName) + "."
+	for _, entry := range entries {
+		obj, ok := entry.(fs.Object)
+		if !ok {
+			continue
+		}
+		name := path.Base(obj.Remote())
+		if !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimPrefix(name, prefix))
+		if err != nil || n <= next {
+			continue
+		}
+		return fmt.Errorf("7z volume set for %q is missing volume %q (found %q)", baseName, missing, obj.Remote())
+	}
+	return nil
 }
 
 func concatFetch(ctx context.Context, volumes []sevenZipVolume, acc *accounting.Transfer, options ...fs.OpenOption) rangeFetch {
@@ -236,6 +273,7 @@ func (s *concatState) readerFor(i int) (*windowedReader, error) {
 		if err != nil {
 			return nil, err
 		}
+		r.name = s.volumes[i].obj.Remote()
 		s.readers[i] = r
 	}
 	return s.readers[i], nil

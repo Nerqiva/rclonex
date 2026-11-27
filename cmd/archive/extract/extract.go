@@ -266,19 +266,7 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 				filesExtracted++
 				return nil
 			}
-			fin, err := open()
-			if err != nil {
-				return err
-			}
-			counter := &countingReadCloser{ReadCloser: fin}
-			// Rcat creates its own per-file transfer for the upload
-			obj, err := operations.Rcat(ctx, dst, remote, counter, modTime, nil)
-			if err == nil && size >= 0 && counter.n != size {
-				if removeErr := obj.Remove(ctx); removeErr != nil {
-					fs.Debugf(nil, "Failed to remove incomplete %q: %v", remote, removeErr)
-				}
-				err = fmt.Errorf("archive entry %q: extracted %d bytes, expected %d (archive may be corrupt)", nameInArchive, counter.n, size)
-			}
+			err = uploadEntry(ctx, dst, remote, nameInArchive, size, modTime, open)
 			if err == nil {
 				filesExtracted++
 			}
@@ -302,7 +290,7 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 			fs.Infof(nil, "Total files extracted %d", filesExtracted)
 			return err
 		}
-		if lib7zipHandles(srcFile) {
+		if !forceLegacyExtractor && lib7zipHandles(srcFile) {
 			err := extractWithLib7zip(lib7zipArgs{
 				ctx:        ctx,
 				src:        src,
@@ -321,6 +309,9 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 			fs.Debugf(nil, "7-Zip engine unavailable, using the previous extractor")
 		}
 		format, buffered, err := archives.Identify(ctx, "", in)
+		if err != nil {
+			format, buffered, err = archives.Identify(ctx, srcFile, buffered)
+		}
 		if err != nil {
 			return fmt.Errorf("failed to open check file type: %w", err)
 		}
@@ -357,7 +348,9 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 				if err != nil {
 					return fmt.Errorf("failed to collect the 7z volume set for %q: %w", srcFile, err)
 				}
-				source = newWindowedReaderFromFetch(ctx, totalSize, opts.WindowSize, concatFetch(ctx, volumes, tr, options...))
+				volumesReader := newWindowedReaderFromFetch(ctx, totalSize, opts.WindowSize, concatFetch(ctx, volumes, tr, options...))
+				volumesReader.name = srcFile
+				source = volumesReader
 			} else {
 				source, err = newWindowedReader(ctx, srcObj, opts.WindowSize, tr, options...)
 				if err != nil {
@@ -403,6 +396,46 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 		return err
 	})
 	return err
+}
+
+type shortEntryError struct {
+	name string
+	got  int64
+	want int64
+}
+
+func (e *shortEntryError) Error() string {
+	return fmt.Sprintf("archive entry %q: extracted %d bytes, expected %d (archive may be corrupt)", e.name, e.got, e.want)
+}
+
+// uploadEntry streams one archive entry into dst and removes the destination
+// object when the upload fails or yields fewer bytes than the archive declares.
+func uploadEntry(ctx context.Context, dst fs.Fs, remote, nameInArchive string, size int64, modTime time.Time, open func() (io.ReadCloser, error)) error {
+	fin, err := open()
+	if err != nil {
+		return err
+	}
+	counter := &countingReadCloser{ReadCloser: fin}
+	// Rcat creates its own per-file transfer for the upload
+	obj, err := operations.Rcat(ctx, dst, remote, counter, modTime, nil)
+	if err != nil {
+		removePartial(ctx, remote, obj)
+		return fmt.Errorf("archive entry %q: %w", nameInArchive, err)
+	}
+	if size >= 0 && counter.n != size {
+		removePartial(ctx, remote, obj)
+		return &shortEntryError{name: nameInArchive, got: counter.n, want: size}
+	}
+	return nil
+}
+
+func removePartial(ctx context.Context, remote string, obj fs.Object) {
+	if obj == nil {
+		return
+	}
+	if err := obj.Remove(ctx); err != nil && !errors.Is(err, fs.ErrorObjectNotFound) {
+		fs.Debugf(nil, "Failed to remove incomplete %q: %v", remote, err)
+	}
 }
 
 // encryptionHint rewrites an error which indicates the archive is encrypted

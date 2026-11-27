@@ -1495,7 +1495,7 @@ func rcatSrc(ctx context.Context, fdst fs.Fs, dstFileName string, in io.ReadClos
 			}()
 			_, err = io.Copy(spool, streamIn)
 			if err != nil {
-				return nil, fmt.Errorf("failed to copy to temporary spool file: %v", err)
+				return nil, fmt.Errorf("failed to copy to temporary spool file: %w", err)
 			}
 			rs = spool
 		}

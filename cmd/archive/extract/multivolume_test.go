@@ -230,7 +230,8 @@ func TestExtractSevenZipMultiVolumeMissingVolume(t *testing.T) {
 	uploadFixtureVolumes(t, ctx, src, "", "mv-multivolume.7z.001", "mv-multivolume.7z.003")
 
 	err := ArchiveExtract(ctx, dst, "", src, "mv-multivolume.7z.001", DefaultExtractOptions())
-	assert.Error(t, err)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "mv-multivolume.7z.002")
 }
 
 type shortErrorReader struct {

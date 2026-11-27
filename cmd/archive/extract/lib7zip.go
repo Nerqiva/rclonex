@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/itchio/sevenzip-go/sz"
@@ -85,12 +86,50 @@ func (v *lib7zipVolumes) OpenCurrentVolumeStream() (*sz.InStream, error) {
 	return in, nil
 }
 
+var (
+	lib7zipOnce sync.Once
+	lib7zipLib  *sz.Lib
+	lib7zipErr  error
+	lib7zipMu   sync.Mutex
+)
+
+// lib7zipLibrary owns one Lib for the process. Freeing a Lib deinitialises the
+// shared 7z engine, which cannot be reinitialised safely in the same process.
+func lib7zipLibrary() (*sz.Lib, error) {
+	lib7zipOnce.Do(func() {
+		lib7zipLib, lib7zipErr = sz.NewLib()
+	})
+	return lib7zipLib, lib7zipErr
+}
+
+// lib7zipEncryptionHint adds the --archive-password advice used by the
+// previous extractor. lib7zip reports encrypted headers as ErrNeedPassword
+// and encrypted contents as a failed extraction of entries marked encrypted.
+func lib7zipEncryptionHint(err error, password string, encrypted bool) error {
+	if err == nil {
+		return nil
+	}
+	needPassword := encrypted || errors.Is(err, sz.ErrNeedPassword)
+	unsupportedWithPassword := password != "" && errors.Is(err, sz.ErrNotSupportedArchive)
+	if !needPassword && !unsupportedWithPassword {
+		return err
+	}
+	if password == "" {
+		return fmt.Errorf("archive is encrypted - use --archive-password to supply the password: %w", err)
+	}
+	return fmt.Errorf("failed to decrypt archive - the password supplied with --archive-password is incorrect (or the archive is corrupt): %w", err)
+}
+
 func extractWithLib7zip(args lib7zipArgs) error {
-	lib, err := sz.NewLib()
+	// The shared Lib and the 7z engine behind it are not reentrant, so only
+	// one extraction may use them at a time.
+	lib7zipMu.Lock()
+	defer lib7zipMu.Unlock()
+
+	lib, err := lib7zipLibrary()
 	if err != nil {
 		return fmt.Errorf("%w: failed to initialize 7-Zip: %w", errLib7zipUnavailable, err)
 	}
-	defer lib.Free()
 	args.tr.Reset(args.ctx)
 
 	var streams []*sz.InStream
@@ -115,7 +154,7 @@ func extractWithLib7zip(args lib7zipArgs) error {
 		archive, err = lib.OpenMultiVolumeArchive(callback, args.password, false)
 		streams = append(streams, volumesCB.streams...)
 		if err != nil {
-			return fmt.Errorf("failed to open 7z volume set %q: %w", args.srcFile, err)
+			return lib7zipEncryptionHint(fmt.Errorf("failed to open 7z volume set %q: %w", args.srcFile, err), args.password, false)
 		}
 	} else {
 		in, _, err := newLib7zipInStream(args.ctx, args.srcObj, args)
@@ -125,7 +164,7 @@ func extractWithLib7zip(args lib7zipArgs) error {
 		streams = append(streams, in)
 		archive, err = lib.OpenArchiveEx(in, args.password, false)
 		if err != nil {
-			return fmt.Errorf("failed to open 7z archive %q: %w", args.srcFile, err)
+			return lib7zipEncryptionHint(fmt.Errorf("failed to open 7z archive %q: %w", args.srcFile, err), args.password, false)
 		}
 	}
 	defer archive.Free()
@@ -155,6 +194,7 @@ func extractWithLib7zip(args lib7zipArgs) error {
 		}
 		isDir, _ := item.GetBoolProperty(sz.PidIsDir)
 		size, _ := item.GetUInt64Property(sz.PidSize)
+		encrypted, _ := item.GetBoolProperty(sz.PidEncrypted)
 		mtime, ok := item.GetFileTimeProperty(sz.PidMTime)
 		if !ok {
 			if ticks, found := item.GetUInt64Property(sz.PidMTime); found && ticks > 0 {
@@ -162,6 +202,11 @@ func extractWithLib7zip(args lib7zipArgs) error {
 			} else {
 				mtime = time.Time{}
 			}
+		}
+		if encrypted && args.password == "" {
+			item.Free()
+			errs = append(errs, lib7zipEncryptionHint(fmt.Errorf("archive entry %q is encrypted", name), "", true))
+			continue
 		}
 		if isDir {
 			err := args.handle(name, 0, mtime, true, func() (io.ReadCloser, error) {
@@ -199,6 +244,12 @@ func extractWithLib7zip(args lib7zipArgs) error {
 			extractErr = closeErr
 		}
 		uploadResult := <-uploadErr
+		var short *shortEntryError
+		decryptFailed := encrypted && (extractErr != nil || errors.As(uploadResult, &short))
+		if decryptFailed {
+			errs = append(errs, lib7zipEncryptionHint(errors.Join(extractErr, uploadResult), args.password, true))
+			continue
+		}
 		if extractErr != nil {
 			errs = append(errs, fmt.Errorf("failed to extract %q: %w", name, extractErr))
 		}

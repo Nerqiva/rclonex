@@ -245,6 +245,7 @@ func TestWindowedReaderRangeNotSupported(t *testing.T) {
 
 	_, err := r.ReadAt(make([]byte, 100), 0)
 	assert.ErrorIs(t, err, errRangeNotSupported)
+	assert.Contains(t, err.Error(), "file.bin")
 }
 
 func TestWindowedReaderRangeNotSupportedUnaligned(t *testing.T) {

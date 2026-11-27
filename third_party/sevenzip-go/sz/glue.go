@@ -167,12 +167,14 @@ func NewInStream(reader ReaderAtCloser, ext string, size int64) (*InStream, erro
 
 	def := C.libc7zip_in_stream_get_def(strm)
 	def.size = C.int64_t(in.size)
-	def.ext = C.CString(ext)
+	cExt := C.CString(ext)
+	def.ext = cExt
 	def.id = C.int64_t(in.id)
 	def.read_cb = (C.read_cb_t)(unsafe.Pointer(C.inReadGo_cgo))
 	def.seek_cb = (C.seek_cb_t)(unsafe.Pointer(C.inSeekGo_cgo))
 
 	C.libc7zip_in_stream_commit_def(strm)
+	C.free(unsafe.Pointer(cExt))
 
 	return in, nil
 }
@@ -184,8 +186,10 @@ func (in *InStream) SetExt(ext string) {
 	}
 
 	def := C.libc7zip_in_stream_get_def(strm)
-	def.ext = C.CString(ext)
+	cExt := C.CString(ext)
+	def.ext = cExt
 	C.libc7zip_in_stream_commit_def(strm)
+	C.free(unsafe.Pointer(cExt))
 }
 
 func (in *InStream) Seek(offset int64, whence int) (int64, error) {
@@ -291,7 +295,9 @@ func (lib *Lib) OpenArchiveEx(in *InStream, password string, bySignature bool) (
 		cBySignature = 1
 	}
 
-	arch := C.libc7zip_archive_open_ex(lib.lib, in.strm, C.CString(password), cBySignature)
+	cPassword := C.CString(password)
+	arch := C.libc7zip_archive_open_ex(lib.lib, in.strm, cPassword, cBySignature)
+	C.free(unsafe.Pointer(cPassword))
 	if arch == nil {
 		err := coalesceErrors(in.Error(), lib.Error(), ErrUnknownError)
 		return nil, errors.WithStack(err)
@@ -317,8 +323,9 @@ type MultiVolumeCallback struct {
 	cb    *C.multivolume_callback
 	funcs MultiVolumeCallbackFuncs
 
-	in     *InStream
-	errors []error
+	in              *InStream
+	errors          []error
+	firstVolumeName *C.char
 }
 
 func NewMultiVolumeCallback(funcs MultiVolumeCallbackFuncs) (*MultiVolumeCallback, error) {
@@ -348,6 +355,10 @@ func (mc *MultiVolumeCallback) Errors() []error {
 }
 
 func (mc *MultiVolumeCallback) Free() {
+	if mc.firstVolumeName != nil {
+		C.free(unsafe.Pointer(mc.firstVolumeName))
+		mc.firstVolumeName = nil
+	}
 	C.libc7zip_multivolume_callback_free(mc.cb)
 }
 
@@ -357,11 +368,13 @@ func (lib *Lib) OpenMultiVolumeArchive(mc *MultiVolumeCallback, password string,
 		cBySignature = 1
 	}
 
+	cPassword := C.CString(password)
 	// returns a boolean, truthiness indicates success
-	arch := C.libc7zip_archive_multiopen(lib.lib, mc.cb, C.CString(password), cBySignature)
+	arch := C.libc7zip_archive_multiopen(lib.lib, mc.cb, cPassword, cBySignature)
+	C.free(unsafe.Pointer(cPassword))
 	if arch == nil {
-		err := coalesceErrors(lib.Error(), ErrUnknownError)
-		return nil, errors.WithStack(err)
+		errs := append([]error{lib.Error()}, mc.Errors()...)
+		return nil, errors.WithStack(coalesceErrors(append(errs, ErrUnknownError)...))
 	}
 
 	a := &Archive{
@@ -538,7 +551,7 @@ func (i *Item) GetBoolProperty(id PropertyIndex) (bool, bool) {
 func (i *Item) GetFileTimeProperty(id PropertyIndex) (time.Time, bool) {
 	var success = C.int32_t(0)
 	val := uint64(C.libc7zip_item_get_filetime_property(i.item, C.int32_t(id), &success))
-	ret := time.Unix(int64(val)/10000000-int64(11644473600), int64(val)%10000000)
+	ret := time.Unix(int64(val)/10000000-int64(11644473600), int64(val)%10000000*100)
 	return ret, success == 1
 }
 
@@ -827,7 +840,11 @@ func mcGetFirstVolumeNameGo(id int64) *C.char {
 		return nil
 	}
 
-	return C.CString(mc.funcs.GetFirstVolumeName())
+	if mc.firstVolumeName != nil {
+		C.free(unsafe.Pointer(mc.firstVolumeName))
+	}
+	mc.firstVolumeName = C.CString(mc.funcs.GetFirstVolumeName())
+	return mc.firstVolumeName
 }
 
 //export mcMoveToVolumeGo
