@@ -26,8 +26,9 @@ import (
 )
 
 var (
-	archivePassword   string
-	archiveWindowSize int64
+	archivePassword     string
+	archiveWindowSize   int64
+	archiveSkipExisting bool
 
 	errPasswordUnsupported = errors.New("--archive-password is only supported for RAR and 7z archives")
 )
@@ -36,8 +37,9 @@ const defaultWindowSize = 16 << 20
 
 // ExtractOptions configures an ArchiveExtract call.
 type ExtractOptions struct {
-	Password   string
-	WindowSize int64
+	Password     string
+	WindowSize   int64
+	SkipExisting bool
 }
 
 // DefaultExtractOptions returns the options used when none are supplied.
@@ -49,6 +51,7 @@ func init() {
 	flagSet := Command.Flags()
 	flags.StringVarP(flagSet, &archivePassword, "archive-password", "", "", "Password for encrypted RAR and 7z archives", "")
 	flags.Int64VarP(flagSet, &archiveWindowSize, "archive-window-size", "", defaultWindowSize, "Sliding window cache size in bytes for random-access archives (ZIP, 7z, ISO9660); 0 disables caching", "")
+	flags.BoolVarP(flagSet, &archiveSkipExisting, "archive-skip-existing", "", false, "Skip entries already present at the destination with the same size", "")
 	archive.Command.AddCommand(Command)
 }
 
@@ -134,6 +137,10 @@ files being extracted:
 the archive's metadata blocks (16 MiB by default; 0 disables caching).
 It does not limit the dictionary or metadata memory described above.
 
+With --archive-skip-existing, entries whose destination object already
+exists with the same size are left untouched. This lets a retry continue
+an interrupted extraction without re-uploading completed files.
+
 The [archive backend](/archive/) can also be used to extract files. It
 can be used to read only mount archives also but it supports a
 different set of archive formats to the archive commands.
@@ -146,8 +153,9 @@ different set of archive formats to the archive commands.
 		cmd.CheckArgs(2, 2, command, args)
 
 		opts := ExtractOptions{
-			Password:   archivePassword,
-			WindowSize: archiveWindowSize,
+			Password:     archivePassword,
+			WindowSize:   archiveWindowSize,
+			SkipExisting: archiveSkipExisting,
 		}
 
 		src, srcFile := cmd.NewFsFile(args[0])
@@ -239,6 +247,12 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 			}
 			if !fi.Include(remote, size, modTime, fs.Metadata{}) {
 				return nil
+			}
+			if opts.SkipExisting && size >= 0 {
+				if obj, err := dst.NewObject(ctx, remote); err == nil && obj.Size() == size {
+					fs.Debugf(nil, "Skipping existing %s", remote)
+					return nil
+				}
 			}
 			if isDir {
 				fs.Debugf(nil, "mkdir %s", remote)
@@ -345,10 +359,12 @@ func ArchiveExtract(ctx context.Context, dst fs.Fs, dstDir string, src fs.Fs, sr
 		if rar4 && isRecoverableRAR4DecodeError(err) {
 			primaryErr := err
 			fs.Logf(nil, "RAR decoder failed (%v), trying unarr RAR4 fallback", err)
-			counted := filesExtracted
 			stagingDir := path.Join(dstDir, fmt.Sprintf(".rclonex-rar4-fallback-%d", time.Now().UnixNano()))
 			tr.Reset(ctx)
-			filesExtracted = counted
+			// The primary attempt is discarded, so its counted errors must not
+			// survive into the command result when the fallback succeeds.
+			accounting.Stats(ctx).ResetErrors()
+			filesExtracted = 0
 			fallbackErr := extractRAR4WithUnarr(ctx, srcObj, opts.WindowSize, tr, newEntryHandler(stagingDir))
 			if fallbackErr == nil {
 				fallbackErr = promoteStaged(ctx, dst, stagingDir, dstDir)

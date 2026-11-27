@@ -11,6 +11,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/rclone/rclone/fs/accounting"
 )
 
 func memoryFetch(data []byte) func(context.Context, int64, int64) (io.ReadCloser, error) {
@@ -84,6 +86,31 @@ func TestRAR4FallbackFromFetch(t *testing.T) {
 	}
 	if len(names) == 0 {
 		t.Fatal("no entries extracted")
+	}
+}
+
+func TestRAR4FallbackDiscardsPrimaryStatsError(t *testing.T) {
+	data, err := os.ReadFile("testdata/rar4.rar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Corrupt one byte of the file header. The built-in decoder rejects the
+	// archive while unarr still extracts the entry.
+	data[0x2e] ^= 0x80
+
+	ctx := context.Background()
+	stats := accounting.Stats(ctx)
+	stats.ResetErrors()
+	src := memoryFs(t, "src")
+	dst := memoryFs(t, "dst")
+	writeMemObject(t, ctx, src, "bad.rar", data)
+	stats.Error(errors.New("primary decode failure"))
+
+	if err := ArchiveExtract(ctx, dst, "", src, "bad.rar", DefaultExtractOptions()); err != nil {
+		t.Fatalf("fallback should succeed: %v", err)
+	}
+	if stats.Errored() || stats.GetLastError() != nil {
+		t.Fatalf("discarded primary error survived: %v", stats.GetLastError())
 	}
 }
 

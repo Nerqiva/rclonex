@@ -202,6 +202,55 @@ func TestArchiveExtractZipWindowSizeZero(t *testing.T) {
 	checkExtracted(t, ctx, dst, entries)
 }
 
+func TestArchiveExtractSkipExistingSameSize(t *testing.T) {
+	ctx := context.Background()
+	src := memoryFs(t, "src")
+	dst := memoryFs(t, "dst")
+	entries := testArchiveEntries()
+	mt := time.Unix(1735689600, 0).UTC()
+
+	_, err := operations.Rcat(ctx, src, "archive.zip", io.NopCloser(bytes.NewReader(makeZip(t, entries))), mt, nil)
+	require.NoError(t, err)
+
+	hello := entries[0]
+	placeholder := strings.Repeat("X", len(hello.data))
+	_, err = operations.Rcat(ctx, dst, hello.name, io.NopCloser(strings.NewReader(placeholder)), mt, nil)
+	require.NoError(t, err)
+
+	err = ArchiveExtract(ctx, dst, "", src, "archive.zip", ExtractOptions{WindowSize: defaultWindowSize, SkipExisting: true})
+	require.NoError(t, err)
+
+	obj, err := dst.NewObject(ctx, hello.name)
+	require.NoError(t, err)
+	in, err := obj.Open(ctx)
+	require.NoError(t, err)
+	got, err := io.ReadAll(in)
+	require.NoError(t, err)
+	require.NoError(t, in.Close())
+	assert.Equal(t, placeholder, string(got), "same-size entry must be left untouched")
+
+	_, err = dst.NewObject(ctx, "payload.bin")
+	require.NoError(t, err, "other entries must still be extracted")
+}
+
+func TestArchiveExtractSkipExistingSizeMismatch(t *testing.T) {
+	ctx := context.Background()
+	src := memoryFs(t, "src")
+	dst := memoryFs(t, "dst")
+	entries := testArchiveEntries()
+	mt := time.Unix(1735689600, 0).UTC()
+
+	_, err := operations.Rcat(ctx, src, "archive.zip", io.NopCloser(bytes.NewReader(makeZip(t, entries))), mt, nil)
+	require.NoError(t, err)
+
+	_, err = operations.Rcat(ctx, dst, entries[0].name, io.NopCloser(strings.NewReader("short")), mt, nil)
+	require.NoError(t, err)
+
+	err = ArchiveExtract(ctx, dst, "", src, "archive.zip", ExtractOptions{WindowSize: defaultWindowSize, SkipExisting: true})
+	require.NoError(t, err)
+	checkExtracted(t, ctx, dst, entries)
+}
+
 func TestArchiveExtractTarGz(t *testing.T) {
 	ctx := context.Background()
 	src := memoryFs(t, "src")
