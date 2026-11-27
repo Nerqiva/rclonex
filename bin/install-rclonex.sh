@@ -13,6 +13,9 @@
 # RCLONEX_RELEASE_BASE overrides the download base (default
 # https://github.com/Nerqiva/rclonex/releases/download), e.g. for mirrors or tests.
 # RCLONEX_RELEASE_TAG installs that tag without querying the GitHub API.
+# RCLONEX_INSTALL_DIR installs into that directory instead of /usr/local/bin
+# (or $PREFIX/bin on Termux), and checks its rclonex for the current version.
+# The directory must already exist.
 #
 # The script is also attached to each release as "install.sh", so
 #   curl -fsSL https://github.com/Nerqiva/rclonex/releases/latest/download/install.sh | sudo bash
@@ -28,6 +31,7 @@
 set -e
 
 REPO="Nerqiva/rclonex"
+install_dir=${RCLONEX_INSTALL_DIR:-}
 
 usage() { echo "Usage: sudo -v ; curl -fsSL https://raw.githubusercontent.com/${REPO}/main/bin/install-rclonex.sh | sudo bash [-s beta]" 1>&2; exit 1; }
 
@@ -79,10 +83,16 @@ if [ -z "$target_tag" ]; then
     exit 1
 fi
 
-installed_version=$(rclonex version 2>/dev/null | head -n 1 | awk '{print $NF}')
+current_bin=rclonex
+if [ -n "$install_dir" ] && [ -x "$install_dir/rclonex" ]; then
+    current_bin="$install_dir/rclonex"
+fi
+installed_version=$("$current_bin" version 2>/dev/null | head -n 1 | awk '{print $NF}')
 if [ "$installed_version" = "$target_tag" ]; then
-    printf "\nThe latest prerelease version of rclonex %s is already installed.\n\n" "$installed_version"
-    exit 3
+    if [ -z "$install_dir" ] || { [ -f "$install_dir/libc7zip.so" ] && [ -f "$install_dir/7z.so" ] && [ -d "$install_dir/Codecs" ]; }; then
+        printf "\nThe latest prerelease version of rclonex %s is already installed.\n\n" "$installed_version"
+        exit 3
+    fi
 fi
 
 if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ] && command -v pkg >/dev/null 2>&1; then
@@ -154,37 +164,42 @@ fi
 
 tar -xzf "$archive"
 
-if [ -n "$is_termux" ]; then
+if [ -n "$install_dir" ]; then
+    install_dest="$install_dir/rclonex"
+elif [ -n "$is_termux" ]; then
     install_dest="$PREFIX/bin/rclonex"
 else
     install_dest='/usr/local/bin/rclonex'
 fi
-if ! install -m 0755 rclonex "$install_dest"; then
-    if [ -n "$is_termux" ]; then
-        echo "Failed to write $install_dest - run this script inside Termux."
-    else
-        echo 'Failed to write /usr/local/bin/rclonex - run this script with sudo (curl ... | sudo bash)'
-    fi
-    exit 1
-fi
 
+lib_dir=$(dirname "$install_dest")
 if [ -f libc7zip.so ] && [ -f 7z.so ]; then
-    lib_dir=$(dirname "$install_dest")
     for lib in libc7zip.so 7z.so; do
         if ! install -m 0755 "$lib" "$lib_dir/$lib"; then
-            printf '\nFailed to install %s beside %s - run this script with sudo.\n\n' "$lib" "$install_dest"
+            printf '\nFailed to install %s beside %s - check that the directory is writable.\n\n' "$lib" "$install_dest"
             exit 1
         fi
     done
     if [ -d Codecs ]; then
         if ! cp -R Codecs "$lib_dir/"; then
-            printf '\nFailed to install Codecs beside %s - run this script with sudo.\n\n' "$install_dest"
+            printf '\nFailed to install Codecs beside %s - check that the directory is writable.\n\n' "$install_dest"
             exit 1
         fi
     fi
 fi
 
-version=$(rclonex version 2>/dev/null | head -n 1) || true
+if ! install -m 0755 rclonex "$install_dest"; then
+    if [ -n "$install_dir" ]; then
+        echo "Failed to write $install_dest - check that the directory is writable."
+    elif [ -n "$is_termux" ]; then
+        echo "Failed to write $install_dest - run this script inside Termux."
+    else
+        echo "Failed to write $install_dest - run this script with sudo (curl ... | sudo bash)"
+    fi
+    exit 1
+fi
+
+version=$("$install_dest" version 2>/dev/null | head -n 1) || true
 
 printf "\n%s has successfully installed.\n" "${version:-rclonex $target_tag}"
 printf '\nNow run "rclonex config" for setup.\n\n'
