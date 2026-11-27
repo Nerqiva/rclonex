@@ -76,9 +76,10 @@ password_implementation = """MYEXPORT int archive_extract_item_with_password(arc
 
 h = header.read_text()
 if "item_get_filetime_property" not in h:
-    header.write_text(h.replace(header_anchor, declaration + "\n" + header_anchor, 1))
+    h = h.replace(header_anchor, declaration + "\n" + header_anchor, 1)
 if "archive_extract_item_with_password" not in h:
-    header.write_text(h.replace(password_header_anchor, password_declaration + "\n" + password_header_anchor, 1))
+    h = h.replace(password_header_anchor, password_declaration + "\n" + password_header_anchor, 1)
+header.write_text(h)
 
 null_anchor = """\t\tin_stream *is = m_def.open_current_volume_stream_cb(m_def.id);
 \t\treturn is->strm;"""
@@ -90,11 +91,12 @@ null_fixed = """\t\tin_stream *is = m_def.open_current_volume_stream_cb(m_def.id
 
 c = source.read_text()
 if "MYEXPORT uint64_t item_get_filetime_property" not in c:
-    source.write_text(c.replace(source_anchor, implementation + source_anchor, 1))
+    c = c.replace(source_anchor, implementation + source_anchor, 1)
 if "archive_extract_item_with_password" not in c:
-    source.write_text(c.replace(password_source_anchor, password_implementation + password_source_anchor, 1))
+    c = c.replace(password_source_anchor, password_implementation + password_source_anchor, 1)
 if null_anchor in c:
-    source.write_text(c.replace(null_anchor, null_fixed, 1))
+    c = c.replace(null_anchor, null_fixed, 1)
+source.write_text(c)
 
 # A failed volume callback must report a failing HRESULT. Returning false
 # reports S_OK and dereferences a null archive in C7ZipLibrary.
