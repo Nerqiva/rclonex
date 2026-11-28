@@ -49,7 +49,7 @@ func init() {
 	flagSet := Command.Flags()
 	flags.StringVarP(flagSet, &archivePassword, "archive-password", "", "", "Password for encrypted RAR and 7z archives", "")
 	flags.Int64VarP(flagSet, &archiveWindowSize, "archive-window-size", "", defaultWindowSize, "Sliding window cache size in bytes for random-access archives (ZIP, 7z, ISO9660); 0 disables caching", "")
-	flags.BoolVarP(flagSet, &archiveSkipExisting, "archive-skip-existing", "", false, "Skip entries already present at the destination with the same size", "")
+	flags.BoolVarP(flagSet, &archiveSkipExisting, "archive-skip-existing", "", true, "Skip entries already present at the destination with the same size", "")
 	archive.Command.AddCommand(Command)
 }
 
@@ -110,9 +110,10 @@ and buffers at most RCLONEX_ARCHIVE_BUFFER_SIZE bytes (64 MiB by default;
 minimum 1 MiB). Memory usage also grows with the number of archive entries
 and with the dictionary size declared by 7z archives.
 
-With --archive-skip-existing, entries whose destination object already
-exists with the same size are left untouched. This lets a retry continue
-an interrupted extraction without re-uploading completed files.
+By default, entries whose destination object already exists with the same
+size are left untouched. This lets a retry continue an interrupted extraction
+without re-uploading completed files. Pass --archive-skip-existing=false to
+extract over existing files.
 
 The [archive backend](/archive/) can also be used to extract files. It
 can be used to read only mount archives also but it supports a
